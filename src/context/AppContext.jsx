@@ -1,12 +1,10 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { DEFAULT_MENU, DEFAULT_CREMAS, DEFAULT_CATEGORIES } from '../data/defaultMenu';
+import { debtBalance, paymentEvents } from '../domain/finance';
 
 const AppContext = createContext();
 
-export const DEFAULT_USERS = [
-  { id: 'usr-1', name: 'Miriam (Dueña)', role: 'admin', pin: '1234', avatar: '👩‍🍳' },
-  { id: 'usr-2', name: 'Ayudante / Mozo', role: 'ayudante', pin: '0000', avatar: '🧑‍🍳' }
-];
+export const DEFAULT_USERS = [];
 
 // Editable WhatsApp greeting sent to frequent customers ("caseros").
 // Use {nombre} as a placeholder that gets replaced by the customer name.
@@ -33,41 +31,7 @@ export const DEFAULT_SETTINGS = {
   thankYouMessage: '¡Muchas gracias por su preferencia casero! ✨'
 };
 
-export const DEFAULT_CUSTOMERS = [
-  {
-    id: 'cli-1',
-    name: 'Carlos Mendoza (Casero)',
-    phone: '987654321',
-    favoriteDish: 'Pollo Broaster (Pierna)',
-    favoriteCremas: ['Mayonesa', 'Ají Pollero', 'Tártara'],
-    notes: 'Casero fiel de los viernes. Le gustan las papas bien fritas y crocantes.',
-    totalOrders: 14,
-    totalSpent: 196.00,
-    lastVisit: '2026-10-10'
-  },
-  {
-    id: 'cli-2',
-    name: 'Sra. Rosa Fernández',
-    phone: '912345678',
-    favoriteDish: 'Salchipollo',
-    favoriteCremas: ['Todas'],
-    notes: 'Vecina de la esquina. Pide para llevar con tártara generosa.',
-    totalOrders: 9,
-    totalSpent: 118.50,
-    lastVisit: '2026-10-11'
-  },
-  {
-    id: 'cli-3',
-    name: 'Don Lucho (Taller de Motos)',
-    phone: '955443322',
-    favoriteDish: 'Mostrito Carretillero',
-    favoriteCremas: ['Ají Pollero', 'Mostaza'],
-    notes: 'Siempre pide con Inca Kola helada. Avisarle por WhatsApp cuando abre la carretilla.',
-    totalOrders: 6,
-    totalSpent: 108.00,
-    lastVisit: '2026-10-09'
-  }
-];
+export const DEFAULT_CUSTOMERS = [];
 
 // Safe sound player using Web Audio API (works offline, zero external assets required)
 const playSound = (type = 'click') => {
@@ -122,6 +86,16 @@ const getLocalDateString = (d = new Date()) => {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+const withOrderStatus = (order, status, at = new Date().toISOString()) => {
+  if (order.status === status) return order;
+  return {
+    ...order,
+    status,
+    updatedAt: at,
+    statusHistory: [...(order.statusHistory || []), { status, at }]
+  };
 };
 
 export const AppProvider = ({ children }) => {
@@ -200,52 +174,7 @@ export const AppProvider = ({ children }) => {
     try {
       const saved = localStorage.getItem('antojitos_miriam_orders');
       if (saved) return JSON.parse(saved);
-      const today = getLocalDateString();
-      return [
-        {
-          id: 'PED-101',
-          orderNumber: 1,
-          customerId: 'cli-1',
-          customerName: 'Carlos Mendoza (Casero)',
-          customerPhone: '987654321',
-          date: today,
-          createdAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-          orderType: 'llevar',
-          items: [
-            { id: 'prod-1', name: 'Pollo Broaster (Pierna)', price: 11.00, quantity: 1, notes: 'Bien crocante' },
-            { id: 'prod-10', name: 'Inca Kola 500ml', price: 3.50, quantity: 1, notes: 'Helada' }
-          ],
-          cremas: ['Mayonesa', 'Ají Pollero', 'Tártara'],
-          specialInstructions: 'Papas bien doradas',
-          total: 14.50,
-          status: 'preparando',
-          payment: null
-        },
-        {
-          id: 'PED-102',
-          orderNumber: 2,
-          customerId: 'cli-2',
-          customerName: 'Sra. Rosa Fernández',
-          customerPhone: '912345678',
-          date: today,
-          createdAt: new Date(Date.now() - 1000 * 60 * 6).toISOString(),
-          orderType: 'mesa',
-          items: [
-            { id: 'prod-7', name: 'Salchipollo', price: 12.00, quantity: 1, notes: '' },
-            { id: 'prod-13', name: 'Huevo Frito Adicional', price: 1.50, quantity: 1, notes: 'A la inglesa' }
-          ],
-          cremas: ['Todas'],
-          specialInstructions: 'Para plato aquí con doble tártara',
-          total: 13.50,
-          status: 'listo',
-          payment: {
-            method: 'yape',
-            amountPaid: 13.50,
-            change: 0,
-            paidAt: new Date(Date.now() - 1000 * 60 * 5).toISOString()
-          }
-        }
-      ];
+      return [];
     } catch {
       return [];
     }
@@ -256,16 +185,7 @@ export const AppProvider = ({ children }) => {
     try {
       const saved = localStorage.getItem('antojitos_miriam_expenses');
       if (saved) return JSON.parse(saved);
-      const today = getLocalDateString();
-      return [
-        {
-          id: 'EXP-1',
-          date: today,
-          description: 'Hielo en bolsa y descartables',
-          amount: 8.00,
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString()
-        }
-      ];
+      return [];
     } catch {
       return [];
     }
@@ -276,6 +196,7 @@ export const AppProvider = ({ children }) => {
 
   // Current tab view: 'tomar-pedido' | 'pedidos-activos' | 'caja' | 'clientes' | 'menu'
   const [activeTab, setActiveTab] = useState('tomar-pedido');
+  const [accountOrderId, setAccountOrderId] = useState(null);
 
   // Theme state ('dark' | 'light') - Defaults to dark matching Miriam's brand flyer
   const [theme, setTheme] = useState(() => {
@@ -316,6 +237,63 @@ export const AppProvider = ({ children }) => {
       return DEFAULT_GREETING_MESSAGE;
     }
   });
+
+  const [dbReady, setDbReady] = useState(false);
+  const [dbError, setDbError] = useState('');
+  const writeQueue = useRef(Promise.resolve());
+  const dbRevision = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/state')
+      .then(async response => {
+        if (!response.ok) {
+          const details = await response.json().catch(() => null);
+          throw new Error(details?.error || 'No se pudo abrir la base de datos');
+        }
+        return response.json();
+      })
+      .then(saved => {
+        if (!active) return;
+        if (saved) {
+          dbRevision.current = saved._revision;
+          setUsers(saved.users);
+          setCustomers(saved.customers);
+          setMenu(saved.menu);
+          setCremas(saved.cremas);
+          setSettings({ ...DEFAULT_SETTINGS, ...saved.settings });
+          setCategories(saved.categories);
+          setOrders(saved.orders);
+          setExpenses(saved.expenses);
+          setGreetingTemplate(saved.greetingTemplate);
+          setCurrentUser(previous => saved.users.find(user => user.id === previous?.id) || null);
+        } else {
+          setCurrentUser(null);
+        }
+        setDbReady(true);
+      })
+      .catch(error => { if (active) setDbError(error.message); });
+    return () => { active = false; };
+  }, []);
+
+  // One debounced write per state change. Reading the API never writes back in a loop.
+  useEffect(() => {
+    if (!dbReady) return;
+    const timer = setTimeout(() => {
+      writeQueue.current = writeQueue.current.catch(() => {}).then(() => fetch('/api/state', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ _revision: dbRevision.current, users, customers, menu, cremas, settings, categories, orders, expenses, greetingTemplate })
+      }).then(response => {
+        if (!response.ok) return response.json().then(data => { throw new Error(data.error || 'Error al guardar'); });
+        return response.json();
+      }).then(result => {
+        dbRevision.current = result.revision;
+        setDbError('');
+      }).catch(error => setDbError(`Los cambios solo están en este navegador: ${error.message}`)));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [dbReady, users, customers, menu, cremas, settings, categories, orders, expenses, greetingTemplate]);
 
   // Sync to localStorage
   useEffect(() => {
@@ -416,6 +394,14 @@ export const AppProvider = ({ children }) => {
     setCurrentUser(null);
   };
 
+  const createFirstAdmin = (name, pin) => {
+    if (users.length || !/^\d{4}$/.test(pin) || !name.trim()) return false;
+    const admin = { id: `usr-${crypto.randomUUID()}`, name: name.trim(), role: 'admin', pin, avatar: '👩‍🍳' };
+    setUsers([admin]);
+    setCurrentUser(admin);
+    return true;
+  };
+
   // Editable WhatsApp greeting message actions
   const updateGreetingTemplate = (text) => {
     setGreetingTemplate(text);
@@ -428,7 +414,7 @@ export const AppProvider = ({ children }) => {
   // User Management Actions (Create, Update, Delete)
   const addUser = (userData) => {
     const newUser = {
-      id: `usr-${Date.now().toString().slice(-4)}`,
+      id: `usr-${crypto.randomUUID()}`,
       name: userData.name.trim(),
       role: userData.role || 'ayudante',
       pin: userData.pin.toString().trim(),
@@ -475,14 +461,16 @@ export const AppProvider = ({ children }) => {
   const addOrder = (orderData) => {
     const today = getLocalDateString();
     const orderNumber = getNextOrderNumber(today);
+    const createdAt = new Date().toISOString();
     const newOrder = {
-      id: `PED-${Date.now().toString().slice(-4)}`,
+      id: `PED-${crypto.randomUUID()}`,
       orderNumber,
       date: today,
-      createdAt: new Date().toISOString(),
-      status: 'preparando',
+      createdAt,
+      status: 'recibido',
       payment: null,
-      ...orderData
+      ...orderData,
+      statusHistory: [{ status: 'recibido', at: createdAt }]
     };
 
     setOrders(prev => [newOrder, ...prev]);
@@ -490,17 +478,31 @@ export const AppProvider = ({ children }) => {
     return newOrder;
   };
 
+  const appendToOpenAccount = (orderId, newItems, note = '') => {
+    const order = orders.find(item => item.id === orderId);
+    if (!order?.openAccount || order.payment || order.debt ||
+        order.status === 'cancelado' || !Array.isArray(newItems) || newItems.length === 0) return false;
+    const extra = newItems.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
+    if (!Number.isFinite(extra) || extra <= 0) return false;
+    const now = new Date().toISOString();
+    setOrders(previous => previous.map(item => item.id === orderId ? {
+      ...withOrderStatus(item, 'preparando', now),
+      items: [...(item.items || []), ...newItems],
+      total: Math.round((Number(item.total || 0) + extra) * 100) / 100,
+      specialInstructions: [item.specialInstructions, note.trim()].filter(Boolean).join(' | '),
+      updatedAt: now
+    } : item));
+    triggerAudio('new-order');
+    return true;
+  };
+
   const updateOrderStatus = (orderId, newStatus) => {
     setOrders(prev => prev.map(order => {
-      if (order.id === orderId) {
+      if (order.id === orderId && order.status !== newStatus) {
         if (newStatus === 'listo' && order.status !== 'listo') {
           triggerAudio('ready');
         }
-        return {
-          ...order,
-          status: newStatus,
-          updatedAt: new Date().toISOString()
-        };
+        return withOrderStatus(order, newStatus);
       }
       return order;
     }));
@@ -512,12 +514,13 @@ export const AppProvider = ({ children }) => {
       const updated = prev.map(order => {
         if (order.id === orderId) {
           paidOrderTarget = order;
+          const paidAt = new Date().toISOString();
           return {
-            ...order,
-            status: 'entregado',
+            ...withOrderStatus(order, 'entregado', paidAt),
+            openAccount: false,
             payment: {
               ...paymentData,
-              paidAt: new Date().toISOString()
+              paidAt
             }
           };
         }
@@ -525,7 +528,7 @@ export const AppProvider = ({ children }) => {
       });
 
       // Update customer stats if linked
-      if (paidOrderTarget) {
+      if (paidOrderTarget && !paidOrderTarget.payment) {
         const cId = paidOrderTarget.customerId;
         const cName = paidOrderTarget.customerName;
         const total = paidOrderTarget.total || 0;
@@ -549,10 +552,52 @@ export const AppProvider = ({ children }) => {
     triggerAudio('paid');
   };
 
+  const markOrderAsDebt = (orderId, debtorName, debtorPhone = '') => {
+    const order = orders.find(item => item.id === orderId);
+    const name = debtorName?.trim();
+    if (!order || order.status !== 'listo' || order.payment || order.debt ||
+        !name || name.toLowerCase() === 'cliente al paso') return false;
+    const now = new Date().toISOString();
+    setOrders(previous => previous.map(item => item.id === orderId ? {
+      ...withOrderStatus(item, 'entregado', now), customerName: name, customerPhone: debtorPhone.trim(),
+      openAccount: false,
+      debt: { createdAt: now }, debtPayments: []
+    } : item));
+    setCustomers(previous => previous.map(customer => customer.id === order.customerId ? {
+      ...customer,
+      totalOrders: (customer.totalOrders || 0) + 1,
+      totalSpent: (customer.totalSpent || 0) + (order.total || 0),
+      lastVisit: getLocalDateString()
+    } : customer));
+    return true;
+  };
+
+  const recordDebtPayment = (orderId, amount, method) => {
+    const order = orders.find(item => item.id === orderId);
+    const cents = Math.round(Number(amount) * 100);
+    const balanceCents = Math.round(debtBalance(order || {}) * 100);
+    if (!order?.debt || !Number.isSafeInteger(cents) || cents <= 0 || cents > balanceCents ||
+        !['efectivo', 'yape', 'plin', 'tarjeta', 'otro'].includes(method)) return false;
+    const now = new Date().toISOString();
+    setOrders(previous => previous.map(item => {
+      if (item.id !== orderId) return item;
+      const debtPayments = [...(item.debtPayments || []), {
+        id: `abono-${crypto.randomUUID()}`, amount: cents / 100, method, paidAt: now
+      }];
+      return {
+        ...item, debtPayments, updatedAt: now,
+        payment: debtBalance({ ...item, debtPayments }) === 0 ? {
+          method, amountPaid: item.total, change: 0, paidAt: now
+        } : null
+      };
+    }));
+    return true;
+  };
+
   const cancelOrder = (orderId) => {
     setOrders(prev => prev.map(order => {
       if (order.id === orderId) {
-        return { ...order, status: 'cancelado' };
+        return withOrderStatus(order, 'cancelado');
       }
       return order;
     }));
@@ -565,7 +610,7 @@ export const AppProvider = ({ children }) => {
   // Customers Management Actions
   const addCustomer = (customerData) => {
     const newCustomer = {
-      id: `cli-${Date.now().toString().slice(-4)}`,
+      id: `cli-${crypto.randomUUID()}`,
       name: customerData.name.trim(),
       phone: customerData.phone?.trim() || '',
       favoriteDish: customerData.favoriteDish || '',
@@ -591,7 +636,7 @@ export const AppProvider = ({ children }) => {
   // Expenses
   const addExpense = (description, amount) => {
     const newExpense = {
-      id: `EXP-${Date.now().toString().slice(-4)}`,
+      id: `EXP-${crypto.randomUUID()}`,
       date: filterDate,
       description: description.trim(),
       amount: parseFloat(amount) || 0,
@@ -621,7 +666,7 @@ export const AppProvider = ({ children }) => {
   const addProduct = (newProduct) => {
     const created = {
       ...newProduct,
-      id: `prod-${Date.now().toString().slice(-4)}`,
+      id: `prod-${crypto.randomUUID()}`,
       available: true
     };
     setMenu(prev => [...prev, created]);
@@ -639,7 +684,7 @@ export const AppProvider = ({ children }) => {
   const addCrema = (cremaData) => {
     const name = (cremaData.name || '').trim();
     const created = {
-      id: `crema-${Date.now().toString().slice(-4)}`,
+      id: `crema-${crypto.randomUUID()}`,
       name,
       short: (cremaData.short || name).trim().slice(0, 12)
     };
@@ -673,7 +718,7 @@ export const AppProvider = ({ children }) => {
     const name = (catData.name || '').trim();
     if (!name) return null;
     const created = {
-      id: `cat-${Date.now().toString().slice(-4)}`,
+      id: `cat-${crypto.randomUUID()}`,
       name,
       icon: catData.icon || 'Utensils'
     };
@@ -699,22 +744,23 @@ export const AppProvider = ({ children }) => {
 
   // Metrics for the currently selected filterDate
   const filteredOrders = orders.filter(o => o.date === filterDate);
-  const activeOrdersCount = orders.filter(o => o.date === getLocalDateString() && (o.status === 'preparando' || o.status === 'listo')).length;
+  const activeOrdersCount = orders.filter(o => o.date === getLocalDateString() && ['recibido', 'preparando', 'listo'].includes(o.status)).length;
 
-  const validPaidOrders = filteredOrders.filter(o => o.status !== 'cancelado' && o.payment);
-  const totalSales = validPaidOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+  const validPaidOrders = filteredOrders.filter(o => o.status !== 'cancelado' && (o.payment || o.debt));
+  const dailyPayments = paymentEvents(orders, filterDate);
+  const totalSales = dailyPayments.reduce((sum, payment) => sum + payment.amount, 0);
   
-  const cashSales = validPaidOrders
-    .filter(o => o.payment?.method === 'efectivo')
-    .reduce((sum, o) => sum + (o.total || 0), 0);
+  const cashSales = dailyPayments
+    .filter(payment => payment.method === 'efectivo')
+    .reduce((sum, payment) => sum + payment.amount, 0);
 
-  const yapePlinSales = validPaidOrders
-    .filter(o => o.payment?.method === 'yape' || o.payment?.method === 'plin')
-    .reduce((sum, o) => sum + (o.total || 0), 0);
+  const yapePlinSales = dailyPayments
+    .filter(payment => payment.method === 'yape' || payment.method === 'plin')
+    .reduce((sum, payment) => sum + payment.amount, 0);
 
-  const cardOtherSales = validPaidOrders
-    .filter(o => o.payment?.method === 'tarjeta' || o.payment?.method === 'otro')
-    .reduce((sum, o) => sum + (o.total || 0), 0);
+  const cardOtherSales = dailyPayments
+    .filter(payment => payment.method === 'tarjeta' || payment.method === 'otro')
+    .reduce((sum, payment) => sum + payment.amount, 0);
 
   const filteredExpenses = expenses.filter(e => e.date === filterDate);
   const totalExpenses = filteredExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
@@ -743,6 +789,7 @@ export const AppProvider = ({ children }) => {
         users,
         login,
         logout,
+        createFirstAdmin,
         addUser,
         updateUser,
         deleteUser,
@@ -757,17 +804,25 @@ export const AppProvider = ({ children }) => {
         setFilterDate,
         activeTab,
         setActiveTab,
+        accountOrderId,
+        setAccountOrderId,
         theme,
         toggleTheme,
         soundEnabled,
         setSoundEnabled,
         greetingTemplate,
+        dbReady,
+        dbError,
         updateGreetingTemplate,
         resetGreetingTemplate,
         activeOrdersCount,
         addOrder,
+        appendToOpenAccount,
         updateOrderStatus,
         payOrder,
+        markOrderAsDebt,
+        recordDebtPayment,
+        dailyPayments,
         cancelOrder,
         deleteOrder,
         addExpense,

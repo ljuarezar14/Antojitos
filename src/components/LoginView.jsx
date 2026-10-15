@@ -16,11 +16,12 @@ import {
 } from 'lucide-react';
 
 export const LoginView = () => {
-  const { users, login, theme, toggleTheme, settings } = useApp();
+  const { users, login, createFirstAdmin, theme, toggleTheme, settings } = useApp();
 
   const [selectedUser, setSelectedUser] = useState(users[0] || null);
   const [pin, setPin] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [ownerName, setOwnerName] = useState('Miriam');
 
   // If selectedUser is no longer in users (e.g. deleted), reset
   const activeUser = users.find(u => u.id === selectedUser?.id) || users[0] || null;
@@ -118,6 +119,20 @@ export const LoginView = () => {
 
         {/* Content */}
         <div className="p-6 space-y-5">
+          {users.length === 0 && (
+            <form onSubmit={event => {
+              event.preventDefault();
+              if (!createFirstAdmin(ownerName, pin)) setErrorMsg('Ingresa un nombre y un PIN de 4 números.');
+            }} className="space-y-3">
+              <h1 className="text-lg font-black">Configurar administradora</h1>
+              <p className="text-sm">Crea el primer acceso para esta base de datos.</p>
+              <input className="w-full rounded-xl border p-3 text-slate-900" value={ownerName} onChange={e => setOwnerName(e.target.value)} placeholder="Nombre" required />
+              <input className="w-full rounded-xl border p-3 text-slate-900" type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="PIN de 4 números" required />
+              {errorMsg && <p role="alert" className="text-red-500 text-sm">{errorMsg}</p>}
+              <button className="w-full rounded-xl bg-amber-500 p-3 font-bold text-stone-950" type="submit">Crear administradora</button>
+            </form>
+          )}
+          {users.length > 0 && <>
           
           {/* User Profile Selector */}
           <div>
@@ -256,6 +271,7 @@ export const LoginView = () => {
               <Delete className="w-5 h-5" />
             </button>
           </div>
+          </>}
         </div>
 
       </div>

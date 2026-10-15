@@ -1,0 +1,23 @@
+{
+  "name": "antojitos-miriam",
+  "main": "cloudflare/worker.js",
+  "compatibility_date": "2026-10-14",
+  "vars": {
+    "TEAM_DOMAIN": "https://damp-tooth-4493.cloudflareaccess.com",
+    "POLICY_AUD": "57c43c2b119ddbce95fc6ac3348c1e6c3285d7ced89a62ef28953eb32514e671"
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "antojitos-miriam",
+      "database_id": "dcd56c82-d3b5-4b5e-9648-af039b903d9c",
+      "migrations_dir": "cloudflare/migrations"
+    }
+  ]
+}

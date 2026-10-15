@@ -111,13 +111,30 @@ export const SettingsView = () => {
     setNewCatName('');
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    let saved;
+    try {
+      const response = await fetch('/api/state');
+      if (!response.ok) throw new Error('No se pudo leer la base de datos');
+      saved = await response.json();
+    } catch (error) {
+      setImportMsg(`No se pudo generar el respaldo: ${error.message}`);
+      return;
+    }
     const data = {};
     Object.keys(localStorage)
       .filter((k) => k.startsWith(BACKUP_PREFIX))
       .forEach((k) => {
         data[k] = localStorage.getItem(k);
       });
+    if (saved) {
+      for (const [suffix, value] of Object.entries({
+        users_list: saved.users, customers: saved.customers, menu: saved.menu,
+        cremas: saved.cremas, settings: saved.settings, categories: saved.categories,
+        orders: saved.orders, expenses: saved.expenses
+      })) data[`${BACKUP_PREFIX}${suffix}`] = JSON.stringify(value);
+      data[`${BACKUP_PREFIX}greeting`] = saved.greetingTemplate;
+    }
     const payload = {
       app: 'antojitos-miriam',
       version: 1,
@@ -137,7 +154,7 @@ export const SettingsView = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const parsed = JSON.parse(reader.result);
         const data = parsed.data || parsed;
@@ -146,11 +163,31 @@ export const SettingsView = () => {
           setImportMsg('El archivo no contiene datos válidos de Antojitos.');
           return;
         }
+        const read = (suffix, fallback) => {
+          try { return JSON.parse(data[`${BACKUP_PREFIX}${suffix}`]) ?? fallback; } catch { return fallback; }
+        };
+        const restored = {
+          _revision: (await (await fetch('/api/state')).json())?._revision ?? 0,
+          users: read('users_list', []),
+          customers: read('customers', []),
+          menu: read('menu', []),
+          cremas: read('cremas', []),
+          settings: read('settings', {}),
+          categories: read('categories', []),
+          orders: read('orders', []),
+          expenses: read('expenses', []),
+          greetingTemplate: data[`${BACKUP_PREFIX}greeting`] || ''
+        };
+        const response = await fetch('/api/state', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(restored)
+        });
+        if (!response.ok) throw new Error('No se pudo guardar el respaldo en la base de datos');
         keys.forEach((k) => localStorage.setItem(k, data[k]));
-        setImportMsg('Datos restaurados. La app se recargará...');
-        setTimeout(() => window.location.reload(), 900);
-      } catch {
-        setImportMsg('No se pudo leer el archivo. Verifica que sea un respaldo válido.');
+        window.location.reload();
+      } catch (error) {
+        setImportMsg(error.message || 'No se pudo leer el archivo. Verifica que sea un respaldo válido.');
       }
     };
     reader.readAsText(file);

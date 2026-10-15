@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { debtBalance } from '../domain/finance';
 import { 
   Clock, 
   CheckCircle2, 
@@ -16,15 +17,23 @@ import {
 } from 'lucide-react';
 
 export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
-  const { orders, updateOrderStatus, cancelOrder, filterDate, todayDateStr } = useApp();
+  const { orders, updateOrderStatus, markOrderAsDebt, cancelOrder, filterDate, todayDateStr, setActiveTab } = useApp();
 
-  const [statusFilter, setStatusFilter] = useState('activos'); // 'activos' | 'preparando' | 'listo' | 'entregado' | 'todos'
+  const [statusFilter, setStatusFilter] = useState('activos'); // 'activos' | 'recibido' | 'preparando' | 'listo' | 'entregado' | 'todos'
+  const [debtDraft, setDebtDraft] = useState(null);
+  const [debtError, setDebtError] = useState('');
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const dayOrders = orders.filter(o => o.date === filterDate);
 
   const filteredOrders = dayOrders.filter(order => {
     if (statusFilter === 'activos') {
-      return order.status === 'preparando' || order.status === 'listo';
+      return ['recibido', 'preparando', 'listo'].includes(order.status);
     }
     if (statusFilter === 'todos') return true;
     return order.status === statusFilter;
@@ -32,7 +41,8 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
 
   const getElapsedMinutes = (createdAt) => {
     try {
-      const diff = Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000);
+      const diff = Math.floor((now - new Date(createdAt).getTime()) / 60000);
+      if (!Number.isFinite(diff)) return '';
       if (diff < 1) return 'Ahora mismo';
       if (diff === 1) return 'Hace 1 min';
       return `Hace ${diff} min`;
@@ -43,6 +53,8 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
 
   const getStatusBadge = (status) => {
     switch (status) {
+      case 'recibido':
+        return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-sky-100 dark:bg-sky-950/50 text-sky-800 dark:text-sky-300 border border-sky-300 dark:border-sky-800">Recibido</span>;
       case 'preparando':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/50 animate-pulse">
@@ -72,7 +84,8 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
     }
   };
 
-  const countActive = dayOrders.filter(o => o.status === 'preparando' || o.status === 'listo').length;
+  const countActive = dayOrders.filter(o => ['recibido', 'preparando', 'listo'].includes(o.status)).length;
+  const countReceived = dayOrders.filter(o => o.status === 'recibido').length;
   const countPreparing = dayOrders.filter(o => o.status === 'preparando').length;
   const countReady = dayOrders.filter(o => o.status === 'listo').length;
   const countDelivered = dayOrders.filter(o => o.status === 'entregado').length;
@@ -91,6 +104,13 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
           }`}
         >
           <span>🔥 Activos ({countActive})</span>
+        </button>
+
+        <button
+          onClick={() => setStatusFilter('recibido')}
+          className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap ${statusFilter === 'recibido' ? 'bg-sky-600 text-white' : 'text-stone-700 dark:text-stone-400 hover:bg-sky-50 dark:hover:bg-stone-800'}`}
+        >
+          Recibidos ({countReceived})
         </button>
 
         <button
@@ -154,6 +174,7 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredOrders.map((order) => {
+            const isReceived = order.status === 'recibido';
             const isPreparing = order.status === 'preparando';
             const isReady = order.status === 'listo';
             const isDelivered = order.status === 'entregado';
@@ -164,7 +185,9 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
               <div
                 key={order.id}
                 className={`bg-white dark:bg-stone-900 rounded-2xl shadow-sm border-2 transition-all flex flex-col justify-between overflow-hidden ${
-                  isPreparing 
+                  isReceived
+                    ? 'border-sky-400 dark:border-sky-700 shadow-md'
+                    : isPreparing
                     ? 'border-amber-400 dark:border-amber-500/70 shadow-md ring-2 ring-amber-400/20' 
                     : isReady
                       ? 'border-emerald-500 dark:border-emerald-500/70 shadow-md ring-2 ring-emerald-500/30'
@@ -173,7 +196,9 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
               >
                 {/* Order Top Bar */}
                 <div className={`p-3.5 flex items-center justify-between border-b ${
-                  isPreparing 
+                  isReceived
+                    ? 'bg-sky-50 dark:bg-sky-950/20 border-sky-200 dark:border-stone-800'
+                    : isPreparing
                     ? 'bg-amber-100/70 dark:bg-amber-950/20 border-amber-300 dark:border-stone-800' 
                     : isReady 
                       ? 'bg-emerald-100/70 dark:bg-emerald-950/20 border-emerald-300 dark:border-stone-800' 
@@ -265,7 +290,11 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
                   </div>
 
                   <div>
-                    {isPaid ? (
+                    {order.debt ? (
+                      <div className={`px-2.5 py-1 rounded-lg text-xs font-bold ${debtBalance(order) > 0 ? 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400' : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'}`}>
+                        {debtBalance(order) > 0 ? `Fiado · Debe S/ ${debtBalance(order).toFixed(2)}` : 'Deuda saldada'}
+                      </div>
+                    ) : isPaid ? (
                       <div className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center justify-between">
                         <span className="flex items-center gap-1">
                           <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -285,10 +314,26 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
                     )}
                   </div>
 
+                  <div className="pt-2 border-t border-slate-100 dark:border-stone-800 text-[11px] text-slate-500 dark:text-stone-400">
+                    <span className="font-bold">Seguimiento:</span>{' '}
+                    {((order.statusHistory?.[0]?.status === 'recibido'
+                      ? order.statusHistory
+                      : [{ status: 'creado', at: order.createdAt }, ...(order.statusHistory || [])])
+                      .filter(event => event.at && !Number.isNaN(new Date(event.at).getTime()))
+                      .map(event => `${({ recibido: 'Recibido', preparando: 'En preparación', listo: 'Listo', entregado: 'Entregado', cancelado: 'Cancelado', creado: 'Creado' })[event.status] || event.status} ${new Date(event.at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`)
+                      .join(' · '))}
+                  </div>
+
                 </div>
 
                 {/* Card Action Footer */}
                 <div className="p-3 bg-slate-50/80 dark:bg-stone-850 border-t border-slate-100 dark:border-stone-800 space-y-2">
+                  {isReceived && (
+                    <button type="button" onClick={() => updateOrderStatus(order.id, 'preparando')}
+                      className="w-full py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-xs">
+                      Iniciar preparación
+                    </button>
+                  )}
                   
                   {isPreparing && (
                     <div className="grid grid-cols-2 gap-2">
@@ -339,6 +384,56 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
                         </button>
                       )}
                     </div>
+                  )}
+
+                  {isReady && !isPaid && !order.debt && (
+                    debtDraft?.id === order.id ? (
+                      <form onSubmit={event => {
+                        event.preventDefault();
+                        setDebtError('');
+                        const name = debtDraft.name.trim();
+                        if (!name || name.toLowerCase() === 'cliente al paso') {
+                          setDebtError('Escribe el nombre de la persona que debe.');
+                          return;
+                        }
+                        if (!confirm(`¿Entregar el pedido #${order.orderNumber} fiado a ${name}? Quedarán S/ ${order.total.toFixed(2)} por cobrar.`)) return;
+                        if (markOrderAsDebt(order.id, name, debtDraft.phone)) {
+                          setDebtDraft(null);
+                          setActiveTab('deudas');
+                        } else setDebtError('No se pudo registrar la deuda. Recarga la página e inténtalo otra vez.');
+                      }} className="space-y-2 rounded-xl border border-red-300 dark:border-red-800 p-3">
+                        <p className="text-xs font-bold text-red-700 dark:text-red-400">¿Quién quedará debiendo S/ {order.total.toFixed(2)}?</p>
+                        <input type="text" required value={debtDraft.name}
+                          onChange={event => setDebtDraft({ ...debtDraft, name: event.target.value })}
+                          placeholder="Nombre del cliente"
+                          className="w-full rounded-lg border border-slate-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+                        <input type="tel" value={debtDraft.phone}
+                          onChange={event => setDebtDraft({ ...debtDraft, phone: event.target.value })}
+                          placeholder="Teléfono (opcional)"
+                          className="w-full rounded-lg border border-slate-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+                        {debtError && <p role="alert" className="text-xs text-red-700 dark:text-red-400">{debtError}</p>}
+                        <div className="flex gap-2">
+                          <button type="submit" className="rounded-lg bg-red-600 px-3 py-2 text-xs font-black text-white">Confirmar fiado</button>
+                          <button type="button" onClick={() => setDebtDraft(null)} className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-stone-300">Cancelar</button>
+                        </div>
+                      </form>
+                    ) : (
+                      <button type="button"
+                        onClick={() => {
+                          setDebtError('');
+                          setDebtDraft({ id: order.id, name: order.customerName === 'Cliente al paso' ? '' : (order.customerName || ''), phone: order.customerPhone || '' });
+                        }}
+                        className="w-full rounded-xl border border-red-300 dark:border-red-800 px-3 py-2 text-xs font-black text-red-700 dark:text-red-400">
+                        Entregar fiado
+                      </button>
+                    )
+                  )}
+
+                  {order.debt && debtBalance(order) > 0 && (
+                    <button type="button" onClick={() => setActiveTab('deudas')}
+                      className="w-full rounded-xl bg-red-100 dark:bg-red-950/40 px-3 py-2 text-xs font-black text-red-700 dark:text-red-400">
+                      Ver deuda y registrar abono
+                    </button>
                   )}
 
                   <div className="flex items-center justify-between pt-1 text-xs text-slate-500 dark:text-stone-400">

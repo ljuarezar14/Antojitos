@@ -32,14 +32,19 @@ export const DailyCashRegisterView = () => {
     filteredOrders, 
     filteredExpenses, 
     dishesRanking,
+    dailyPayments,
+    orders,
     addExpense,
     deleteExpense,
-    settings
+    settings,
+    dbError
   } = useApp();
 
   const [expenseDesc, setExpenseDesc] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [showCopiedAlert, setShowCopiedAlert] = useState(false);
+  const [reportError, setReportError] = useState('');
+  const [exportingReport, setExportingReport] = useState(false);
 
   const expensePresets = [
     'Bolsas y descartables',
@@ -58,13 +63,14 @@ export const DailyCashRegisterView = () => {
     setExpenseAmount('');
   };
 
-  const paidOrders = filteredOrders.filter(o => o.status !== 'cancelado' && o.payment);
-  const averageTicket = paidOrders.length > 0 ? (totalSales / paidOrders.length) : 0;
+  const attendedOrders = filteredOrders.filter(order => order.status === 'entregado');
+  const averageTicket = dailyPayments.length > 0 ? (totalSales / dailyPayments.length) : 0;
+  const newDebts = filteredOrders.filter(order => order.debt);
+  const debtTotal = newDebts.reduce((sum, order) => sum + Number(order.total || 0), 0);
 
   const dailyGoal = settings?.dailyGoal || 0;
   const initialCash = settings?.initialCash || 0;
   const goalProgress = dailyGoal > 0 ? Math.min(100, Math.round((totalSales / dailyGoal) * 100)) : 0;
-  const netAfterInitial = netProfit - initialCash;
 
   const formatFriendlyDate = (dateStr) => {
     try {
@@ -87,10 +93,11 @@ export const DailyCashRegisterView = () => {
       `🍔 *CIERRE DE CAJA - ${bizName}* 🍔`,
       `📅 *Fecha:* ${formatFriendlyDate(filterDate)}`,
       `━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `👥 *Clientes Atendidos:* ${paidOrders.length} personas`,
-      `💰 *VENTAS TOTALES:* S/ ${totalSales.toFixed(2)}`,
+      `👥 *Pedidos entregados:* ${attendedOrders.length}`,
+      `💰 *COBROS RECIBIDOS:* S/ ${totalSales.toFixed(2)}`,
+      `🧾 *Pedidos fiados del día:* ${newDebts.length} (S/ ${debtTotal.toFixed(2)})`,
       ``,
-      `💵 *Efectivo en Caja:* S/ ${cashSales.toFixed(2)}`,
+      `💵 *Cobros en efectivo:* S/ ${cashSales.toFixed(2)}`,
       `📱 *Digital (Yape / Plin):* S/ ${yapePlinSales.toFixed(2)}`,
       cardOtherSales > 0 ? `💳 *Tarjeta / Otros:* S/ ${cardOtherSales.toFixed(2)}` : null,
       `━━━━━━━━━━━━━━━━━━━━━━━━━`,
@@ -117,10 +124,7 @@ export const DailyCashRegisterView = () => {
     }
 
     lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    lines.push(`✨ *GANANCIA NETA DEL DÍA:* S/ ${netProfit.toFixed(2)} ✨`);
-    if (settings?.initialCash && settings.initialCash > 0) {
-      lines.push(`💼 *Ganancia neta (menos fondo):* S/ ${netAfterInitial.toFixed(2)}`);
-    }
+    lines.push(`✨ *RESULTADO DEL DÍA (COBROS - GASTOS):* S/ ${netProfit.toFixed(2)} ✨`);
     lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
     if (dishesRanking.length > 0) {
@@ -150,6 +154,34 @@ export const DailyCashRegisterView = () => {
     navigator.clipboard.writeText(text);
     setShowCopiedAlert(true);
     setTimeout(() => setShowCopiedAlert(false), 3000);
+  };
+
+  const handleDownloadReport = async () => {
+    setReportError('');
+    if (dbError) {
+      setReportError('Hay un error de guardado. Resuélvelo antes de exportar el cierre.');
+      return;
+    }
+    setExportingReport(true);
+    try {
+      const response = await fetch('/api/state');
+      if (!response.ok) throw new Error('No se pudo leer la base de datos.');
+      const saved = await response.json();
+      if (!saved) throw new Error('Todavía no hay datos guardados.');
+      const savedExpenses = saved.expenses.filter(expense => expense.date === filterDate);
+      if (JSON.stringify(saved.orders) !== JSON.stringify(orders) ||
+          JSON.stringify(savedExpenses) !== JSON.stringify(filteredExpenses) ||
+          JSON.stringify(saved.settings) !== JSON.stringify(settings)) {
+        throw new Error('Hay cambios pendientes de guardar. Espera un momento y vuelve a descargar.');
+      }
+      const { buildDailyReport } = await import('../reports/dailyReport');
+      const report = buildDailyReport(saved, filterDate);
+      report.save(`cierre-caja-${filterDate}.pdf`);
+    } catch (error) {
+      setReportError(error.message || 'No se pudo crear el PDF.');
+    } finally {
+      setExportingReport(false);
+    }
   };
 
   return (
@@ -202,7 +234,7 @@ export const DailyCashRegisterView = () => {
         <div className="bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 text-stone-950 p-4 rounded-2xl shadow-md flex flex-col justify-between border border-amber-300">
           <div className="flex items-center justify-between">
             <span className="text-xs font-black uppercase tracking-wider text-amber-950">
-              Ventas Totales
+              Cobros del Día
             </span>
             <DollarSign className="w-5 h-5 text-amber-950" />
           </div>
@@ -223,7 +255,7 @@ export const DailyCashRegisterView = () => {
             </div>
           )}
           <p className="text-[11px] text-amber-950 font-bold">
-            {paidOrders.length} pedidos cobrados
+            {dailyPayments.length} pagos o abonos recibidos
           </p>
         </div>
 
@@ -231,7 +263,7 @@ export const DailyCashRegisterView = () => {
         <div className="bg-white dark:bg-stone-900 border-2 border-amber-200/90 dark:border-stone-800 p-4 rounded-2xl shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-stone-400">
-              Efectivo en Caja
+              Cobros en Efectivo
             </span>
             <Coins className="w-5 h-5 text-amber-600 dark:text-amber-400" />
           </div>
@@ -246,7 +278,7 @@ export const DailyCashRegisterView = () => {
             </p>
           )}
           <p className="text-[11px] text-slate-400 dark:text-stone-500 font-medium">
-            Dinero físico en carretilla
+            Recibido durante este día
           </p>
         </div>
 
@@ -272,17 +304,17 @@ export const DailyCashRegisterView = () => {
         <div className="bg-white dark:bg-stone-900 border-2 border-amber-200/90 dark:border-stone-800 p-4 rounded-2xl shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-stone-400">
-              Ganancia Neta (c/ fondo)
+              Fondo Inicial
             </span>
             <TrendingUp className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
           </div>
           <div className="my-2">
-            <span className="text-2xl sm:text-3xl font-black tracking-tight" style={{ color: netAfterInitial >= 0 ? '#10b981' : '#ef4444' }}>
-              S/ {netAfterInitial.toFixed(2)}
+            <span className="text-2xl sm:text-3xl font-black tracking-tight text-emerald-600 dark:text-emerald-400">
+              S/ {initialCash.toFixed(2)}
             </span>
           </div>
           <p className="text-[11px] text-slate-400 dark:text-stone-500 font-medium">
-            Neta - fondo inicial
+            Declarado en configuración
           </p>
         </div>
 
@@ -290,40 +322,54 @@ export const DailyCashRegisterView = () => {
         <div className="bg-white dark:bg-stone-900 border-2 border-amber-200/90 dark:border-stone-800 p-4 rounded-2xl shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-stone-400">
-              Personas Atendidas
+              Pedidos Entregados
             </span>
             <Users className="w-5 h-5 text-amber-600 dark:text-amber-400" />
           </div>
           <div className="my-2">
             <span className="text-2xl sm:text-3xl font-black text-amber-700 dark:text-amber-400 tracking-tight">
-              {paidOrders.length}
+              {attendedOrders.length}
             </span>
           </div>
           <p className="text-[11px] text-slate-500 dark:text-stone-400 font-medium">
-            Ticket promedio: <strong>S/ {averageTicket.toFixed(2)}</strong>
+            Cobro promedio: <strong>S/ {averageTicket.toFixed(2)}</strong>
           </p>
         </div>
 
       </div>
 
+      {newDebts.length > 0 && (
+        <div className="rounded-2xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-3 text-sm font-bold text-red-800 dark:text-red-300">
+          {newDebts.length} pedido(s) fiado(s) en esta fecha por S/ {debtTotal.toFixed(2)}. Los abonos aparecerán como cobros el día en que se registren.
+        </div>
+      )}
+
       {/* Net Profit Banner - Golden / Matte Black style */}
       <div className="bg-gradient-to-r from-stone-900 via-stone-950 to-stone-900 text-white p-5 rounded-2xl shadow-md flex flex-col sm:flex-row items-center justify-between gap-4 border border-amber-500/30">
         <div>
           <span className="text-xs font-black uppercase tracking-wider text-amber-400">
-            Ganancia Neta Real (Ventas - Gastos)
+            Resultado del Día (Cobros - Gastos)
           </span>
           <div className="flex items-baseline gap-2 mt-1">
             <span className="text-3xl sm:text-4xl font-black text-amber-400">
               S/ {netProfit.toFixed(2)}
             </span>
             <span className="text-xs text-stone-300 font-bold">
-              (S/ {totalSales.toFixed(2)} ventas - S/ {totalExpenses.toFixed(2)} compras)
+              (S/ {totalSales.toFixed(2)} cobros - S/ {totalExpenses.toFixed(2)} gastos)
             </span>
           </div>
         </div>
 
         {/* WhatsApp & Export Actions */}
-        <div className="flex gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <button
+            onClick={handleDownloadReport}
+            disabled={exportingReport}
+            className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-white text-stone-950 hover:bg-amber-100 disabled:opacity-60 font-black text-xs sm:text-sm flex items-center justify-center gap-1.5"
+          >
+            <Download className="w-4 h-4" />
+            <span>{exportingReport ? 'Generando PDF...' : 'Descargar cierre PDF'}</span>
+          </button>
           <button
             onClick={handleShareWhatsApp}
             className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-amber-500 text-stone-950 hover:bg-amber-400 font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 transition-all"
@@ -340,6 +386,8 @@ export const DailyCashRegisterView = () => {
           </button>
         </div>
       </div>
+
+      {reportError && <div role="alert" className="rounded-xl bg-red-900 px-4 py-3 text-sm font-bold text-white">{reportError}</div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         
@@ -453,7 +501,7 @@ export const DailyCashRegisterView = () => {
 
             {dishesRanking.length === 0 ? (
               <p className="text-xs text-slate-400 dark:text-stone-500 text-center py-8 bg-slate-50 dark:bg-stone-850 rounded-xl border border-dashed border-slate-200 dark:border-stone-800">
-                Aún no hay ventas cobradas registradas para este día.
+                Aún no hay platos entregados registrados para este día.
               </p>
             ) : (
               <div className="space-y-2.5">

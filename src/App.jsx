@@ -9,18 +9,25 @@ import { CustomersView } from './components/CustomersView';
 import { MenuManagementView } from './components/MenuManagementView';
 import { PaymentModal } from './components/PaymentModal';
 import { ReceiptModal } from './components/ReceiptModal';
+import { SettingsView } from './components/SettingsView';
+import { DebtsView } from './components/DebtsView';
+import { OpenAccountsView } from './components/OpenAccountsView';
 import { Sparkles, HelpCircle, X } from 'lucide-react';
 
 const MainContent = () => {
-  const { currentUser, activeTab, theme } = useApp();
+  const { currentUser, activeTab, theme, dbReady, dbError } = useApp();
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [receiptOrder, setReceiptOrder] = useState(null);
   const [preselectedCustomer, setPreselectedCustomer] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
 
+  if (!dbReady) {
+    return <div role={dbError ? 'alert' : undefined} className="min-h-screen grid place-items-center bg-stone-950 px-6 text-center text-amber-400 font-bold">{dbError || 'Abriendo base de datos...'}</div>;
+  }
+
   // If user is not authenticated, show Login Screen
   if (!currentUser) {
-    return <LoginView />;
+    return <><LoginView />{dbError && <div role="alert" className="fixed bottom-4 left-4 right-4 z-50 rounded-xl bg-red-900 p-3 text-white text-sm">{dbError}</div>}</>;
   }
 
   return (
@@ -28,6 +35,7 @@ const MainContent = () => {
       theme === 'dark' ? 'dark bg-stone-950 text-stone-100' : 'bg-slate-100 text-slate-900'
     }`}>
       <Navbar />
+      {dbError && <div role="alert" className="bg-red-900 px-4 py-2 text-center text-sm text-white">{dbError}</div>}
 
       <main className="flex-1">
         {activeTab === 'tomar-pedido' && (
@@ -43,10 +51,12 @@ const MainContent = () => {
             onOpenReceipt={(order) => setReceiptOrder(order)}
           />
         )}
+        {activeTab === 'cuentas' && <OpenAccountsView onOpenPayment={(order) => setPaymentOrder(order)} />}
 
         {activeTab === 'caja' && (
           <DailyCashRegisterView />
         )}
+        {activeTab === 'deudas' && <DebtsView />}
 
         {activeTab === 'clientes' && (
           <CustomersView 
@@ -57,6 +67,7 @@ const MainContent = () => {
         {activeTab === 'menu' && (
           <MenuManagementView />
         )}
+        {activeTab === 'admin' && currentUser.role === 'admin' && <SettingsView />}
       </main>
 
       {/* Payment Modal */}

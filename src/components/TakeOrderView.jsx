@@ -19,7 +19,9 @@ import {
 } from 'lucide-react';
 
 export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => {
-  const { menu, addOrder, customers, addCustomer, setActiveTab, cremas, categories } = useApp();
+  const { menu, orders, addOrder, appendToOpenAccount, accountOrderId, setAccountOrderId,
+    customers, addCustomer, setActiveTab, cremas, categories } = useApp();
+  const accountOrder = orders.find(order => order.id === accountOrderId && order.openAccount);
 
   const [selectedCategory, setSelectedCategory] = useState('todos');
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,13 +39,23 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
   const [expandedLineId, setExpandedLineId] = useState(null);
   const [specialNote, setSpecialNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [orderError, setOrderError] = useState('');
 
   // If a customer was pre-selected from CustomersView
   useEffect(() => {
-    if (preselectedCustomer) {
+    if (preselectedCustomer && !accountOrderId) {
       applyCustomer(preselectedCustomer);
     }
-  }, [preselectedCustomer]);
+  }, [preselectedCustomer, accountOrderId]);
+
+  useEffect(() => {
+    if (!accountOrder) return;
+    setCustomerName(accountOrder.customerName);
+    setCustomerPhone(accountOrder.customerPhone || '');
+    setSelectedCustomerId(accountOrder.customerId || null);
+    setOrderType(accountOrder.orderType || 'mesa');
+    setOrderError('');
+  }, [accountOrderId]);
 
   const applyCustomer = (cust) => {
     setSelectedCustomerId(cust.id);
@@ -70,6 +82,7 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
     const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
+  const unavailableProducts = menu.filter(item => !item.available);
 
   // Calculate order subtotal
   const orderTotal = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -150,8 +163,28 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
     setSpecialNote('');
   };
 
-  const handleCreateOrder = (autoPay = false) => {
+  const handleCreateOrder = (autoPay = false, openAccount = false) => {
     if (orderItems.length === 0) return;
+    setOrderError('');
+    const unavailableInOrder = orderItems.find(item => !menu.some(product => product.id === item.id && product.available));
+    if (unavailableInOrder) {
+      setOrderError(`${unavailableInOrder.name} está agotado o ya no figura en la carta. Retíralo del pedido para continuar.`);
+      return;
+    }
+    if (accountOrderId) {
+      if (!accountOrder || !appendToOpenAccount(accountOrderId, orderItems, specialNote)) {
+        setOrderError('Esta cuenta ya no está abierta. Vuelve a Cuentas y selecciónala otra vez.');
+        return;
+      }
+      handleClearCart();
+      setAccountOrderId(null);
+      setActiveTab('cuentas');
+      return;
+    }
+    if (openAccount && (!customerName.trim() || customerName.trim().toLowerCase() === 'cliente al paso')) {
+      setOrderError('Escribe el nombre del cliente para abrir su cuenta.');
+      return;
+    }
 
     setIsSubmitting(true);
 
@@ -178,7 +211,8 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
       items: orderItems,
       cremas: representativeCremas,
       specialInstructions: specialNote.trim(),
-      total: orderTotal
+      total: orderTotal,
+      openAccount
     };
 
     const newOrder = addOrder(orderData);
@@ -188,7 +222,7 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
     if (autoPay) {
       onOpenPayment(newOrder);
     } else {
-      setActiveTab('pedidos-activos');
+      setActiveTab(openAccount ? 'cuentas' : 'pedidos-activos');
     }
   };
 
@@ -207,6 +241,11 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
         
         {/* LEFT: Menu Catalog (7 cols on desktop) */}
         <div className="lg:col-span-7 space-y-4">
+          {unavailableProducts.length > 0 && (
+            <div role="status" className="rounded-xl border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm font-bold text-red-800 dark:text-red-300">
+              Agotado ahora: {unavailableProducts.map(product => product.name).join(', ')}.
+            </div>
+          )}
           
           {/* Search Bar - Warm & Crisp */}
           <div className="bg-white dark:bg-stone-900 p-3 rounded-2xl shadow-sm border-2 border-amber-200/80 dark:border-stone-800 flex flex-col sm:flex-row gap-3 items-center">
@@ -325,11 +364,12 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                       {/* Plus button to add 1 */}
                       <button
                         type="button"
+                        disabled={!product.available}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAddItem(product);
                         }}
-                        className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-stone-950 flex items-center justify-center transition-all shadow-xs active:scale-90 font-black"
+                        className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-stone-950 flex items-center justify-center transition-all shadow-xs active:scale-90 font-black"
                         title="Aumentar 1"
                       >
                         <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[3]" />
@@ -356,7 +396,7 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
             <div className="bg-gradient-to-r from-stone-900 via-stone-950 to-stone-900 text-white px-4 py-3 border-b border-amber-500/30 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShoppingBag className="w-5 h-5 text-amber-400" />
-                <h2 className="font-black text-base">Pedido en Curso</h2>
+                <h2 className="font-black text-base">{accountOrder ? `Agregar a cuenta #${accountOrder.orderNumber}` : 'Pedido en Curso'}</h2>
               </div>
               {orderItems.length > 0 && (
                 <button
@@ -369,6 +409,9 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
             </div>
 
             <div className="p-4 space-y-4 max-h-[calc(100vh-140px)] overflow-y-auto">
+              {accountOrder && <div className="rounded-xl bg-amber-100 dark:bg-stone-800 p-3 text-xs font-bold text-stone-900 dark:text-amber-300">
+                Cuenta de {accountOrder.customerName} · Acumulado S/ {Number(accountOrder.total).toFixed(2)}
+              </div>}
               
               {/* 1. Customer Selection / Autocomplete */}
               <div className="space-y-2">
@@ -378,14 +421,14 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                     <span>Cliente / Casero:</span>
                   </label>
 
-                  <button
+                  {!accountOrder && <button
                     type="button"
                     onClick={() => setShowCaserosPicker(!showCaserosPicker)}
                     className="text-xs text-amber-700 dark:text-amber-400 hover:underline font-black flex items-center gap-1 bg-amber-100/70 dark:bg-stone-800 px-2 py-0.5 rounded-lg border border-amber-300 dark:border-stone-700"
                   >
                     <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
                     <span>Elegir Casero</span>
-                  </button>
+                  </button>}
                 </div>
 
                 {/* Casero Quick Picker Dropdown */}
@@ -421,7 +464,9 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                 )}
 
                 {/* Selected Customer Pill or Input */}
-                {selectedCustomerId ? (
+                {accountOrder ? (
+                  <div className="rounded-xl border border-amber-300 dark:border-stone-700 p-2.5 text-sm font-bold text-slate-900 dark:text-white">{accountOrder.customerName}{accountOrder.customerPhone ? ` · ${accountOrder.customerPhone}` : ''}</div>
+                ) : selectedCustomerId ? (
                   <div className="bg-amber-100/70 dark:bg-stone-800 border-2 border-amber-400 dark:border-amber-500/50 p-2.5 rounded-xl flex items-center justify-between shadow-xs">
                     <div className="flex items-center gap-2">
                       <div className="w-7 h-7 bg-amber-500 text-stone-950 rounded-lg flex items-center justify-center font-black text-xs">
@@ -657,13 +702,19 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
               {/* Total & Action Buttons */}
               <div className="pt-2 border-t border-amber-100 dark:border-stone-800 space-y-3">
                 <div className="flex items-baseline justify-between">
-                  <span className="text-sm font-bold text-stone-600 dark:text-stone-400">Total a Pagar:</span>
+                  <span className="text-sm font-bold text-stone-600 dark:text-stone-400">{accountOrder ? 'Nuevo consumo:' : 'Total a Pagar:'}</span>
                   <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
                     S/ {orderTotal.toFixed(2)}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                {accountOrder && <p className="text-sm font-black text-amber-700 dark:text-amber-400">Total acumulado: S/ {(Number(accountOrder.total) + orderTotal).toFixed(2)}</p>}
+                {orderError && <p role="alert" className="text-xs font-bold text-red-600 dark:text-red-400">{orderError}</p>}
+
+                {accountOrder ? <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => { handleClearCart(); setAccountOrderId(null); setActiveTab('cuentas'); }} className="rounded-xl border border-stone-300 dark:border-stone-700 px-3 py-3 text-xs font-black text-stone-700 dark:text-stone-200">Volver</button>
+                  <button type="button" disabled={orderItems.length === 0 || isSubmitting} onClick={() => handleCreateOrder()} className="rounded-xl bg-amber-500 px-3 py-3 text-xs font-black text-stone-950 disabled:opacity-50">Agregar a cuenta</button>
+                </div> : <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     disabled={orderItems.length === 0 || isSubmitting}
@@ -684,6 +735,8 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                     <span>Cobrar Ahora 💵</span>
                   </button>
                 </div>
+                }
+                {!accountOrder && <button type="button" disabled={orderItems.length === 0 || isSubmitting} onClick={() => handleCreateOrder(false, true)} className="w-full rounded-xl border-2 border-amber-500 bg-amber-100 dark:bg-stone-800 px-3 py-3 text-sm font-black text-amber-950 dark:text-amber-400 disabled:opacity-50">Abrir cuenta para cobrar al retirarse</button>}
               </div>
 
             </div>

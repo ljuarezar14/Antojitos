@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { SettingsView } from './SettingsView';
 import { 
   ShoppingBag, 
   Clock, 
@@ -15,7 +14,9 @@ import {
   Moon,
   UserCog,
   Settings,
-  ShieldCheck
+  ShieldCheck,
+  Wallet,
+  NotebookTabs
 } from 'lucide-react';
 
 export const Navbar = () => {
@@ -65,9 +66,21 @@ export const Navbar = () => {
       badge: activeOrdersCount > 0 ? activeOrdersCount : null,
     },
     {
+      id: 'cuentas',
+      label: 'Cuentas Abiertas',
+      icon: NotebookTabs,
+      badge: null,
+    },
+    {
       id: 'caja',
       label: 'Caja & Ingresos',
       icon: DollarSign,
+      badge: null,
+    },
+    {
+      id: 'deudas',
+      label: 'Deudas',
+      icon: Wallet,
       badge: null,
     },
     {
@@ -208,8 +221,12 @@ export const Navbar = () => {
               </div>
             )}
 
-            {/* Desktop Navigation Tabs */}
-            <nav className={`hidden lg:flex items-center gap-1 p-1 rounded-2xl border ${
+          </div>
+        </div>
+
+        {/* Desktop Navigation Tabs */}
+        <div className="hidden lg:block max-w-7xl mx-auto px-3 sm:px-4 pb-2">
+          <nav className={`flex items-center gap-1 p-1 rounded-2xl border overflow-x-auto ${
               theme === 'dark'
                 ? 'bg-stone-900 border-stone-800'
                 : 'bg-stone-950 border-stone-900 text-white'
@@ -221,7 +238,7 @@ export const Navbar = () => {
                   <button
                     key={item.id}
                     onClick={() => setActiveTab(item.id)}
-                    className={`relative px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 ${
+                    className={`relative shrink-0 px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 ${
                       isActive
                         ? 'bg-amber-500 text-stone-950 shadow-md shadow-amber-500/20'
                         : 'text-stone-300 hover:text-white hover:bg-white/10'
@@ -237,13 +254,12 @@ export const Navbar = () => {
                   </button>
                 );
               })}
-            </nav>
-          </div>
+          </nav>
         </div>
       </header>
 
       {/* Mobile Bottom Navigation Bar (Supports Light and Dark Mode) */}
-      <nav className={`lg:hidden fixed bottom-0 left-0 right-0 border-t px-1 py-1 z-40 flex items-center justify-around shadow-2xl safe-area-bottom transition-colors duration-200 ${
+      <nav className={`lg:hidden fixed bottom-0 left-0 right-0 border-t px-1 py-1 z-40 flex items-center overflow-x-auto shadow-2xl safe-area-bottom transition-colors duration-200 ${
         theme === 'dark'
           ? 'bg-stone-950 border-stone-800'
           : 'bg-white border-amber-200'
@@ -255,7 +271,7 @@ export const Navbar = () => {
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`relative flex flex-col items-center justify-center flex-1 py-1 px-0.5 rounded-xl transition-all ${
+              className={`relative flex flex-col items-center justify-center flex-none min-w-[60px] grow py-1 px-0.5 rounded-xl transition-all ${
                 isActive
                   ? 'text-amber-500 font-black scale-105'
                   : theme === 'dark'
@@ -284,12 +300,6 @@ export const Navbar = () => {
         <UsersManagementModal onClose={() => setShowUsersModal(false)} />
       )}
 
-      {/* Settings View (Admin only) */}
-      {activeTab === 'admin' && currentUser?.role === 'admin' && (
-        <div className="fixed inset-0 z-50 bg-white dark:bg-stone-950">
-          <SettingsView />
-        </div>
-      )}
     </>
   );
 };

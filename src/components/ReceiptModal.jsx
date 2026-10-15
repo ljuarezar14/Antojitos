@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { debtBalance } from '../domain/finance';
 import { 
   X, 
   Share2, 
@@ -56,7 +57,9 @@ export const ReceiptModal = ({ order, onClose }) => {
     lines.push(`---------------------------------`);
     lines.push(`*TOTAL A PAGAR: S/ ${order.total.toFixed(2)}*`);
 
-    if (order.payment) {
+    if (order.debt) {
+      lines.push(`*Estado:* ${debtBalance(order) > 0 ? `FIADO - SALDO S/ ${debtBalance(order).toFixed(2)}` : 'DEUDA SALDADA'}`);
+    } else if (order.payment) {
       lines.push(`*Estado:* PAGADO (${order.payment.method.toUpperCase()})`);
       if (order.payment.change > 0) {
         lines.push(`*Vuelto:* S/ ${order.payment.change.toFixed(2)}`);
@@ -163,6 +166,8 @@ export const ReceiptModal = ({ order, onClose }) => {
               S/ {order.total.toFixed(2)}
             </span>
           </div>
+
+          {order.debt && <p className="text-center font-black text-red-700">{debtBalance(order) > 0 ? `FIADO · SALDO S/ ${debtBalance(order).toFixed(2)}` : 'DEUDA SALDADA'}</p>}
 
 <p className="text-center pt-2 font-sans text-[11px] text-slate-500">
             {settings?.thankYouMessage || '¡Muchas gracias por su preferencia casero! ✨'}
