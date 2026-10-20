@@ -150,3 +150,16 @@ CREATE TABLE IF NOT EXISTS login_failures (
   failures INTEGER NOT NULL DEFAULT 0,
   locked_until TEXT
 );
+
+-- Who did what (see cloudflare/audit.js).
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  user_id TEXT,
+  user_name TEXT,
+  entity TEXT NOT NULL,
+  entity_id TEXT,
+  action TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);

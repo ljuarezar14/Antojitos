@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { UsersManagementModal } from './UsersManagementModal';
+import { AuditLogPanel } from './AuditLogPanel';
+import { restoreBackup } from '../backupRestore';
 import {
   Home, 
   Store,
@@ -21,6 +23,7 @@ import {
   Coins,
   Smartphone,
   Banknote,
+  History,
 } from 'lucide-react';
 
 const readImage = (file, cb) => {
@@ -28,8 +31,6 @@ const readImage = (file, cb) => {
   reader.onload = () => cb(reader.result);
   reader.readAsDataURL(file);
 };
-
-const BACKUP_PREFIX = 'antojitos_miriam_';
 
 // Images are stored apart from the rest of the data so they are not sent with every save.
 // Returns the URL the settings keep; the version makes browsers fetch a replaced image.
@@ -79,6 +80,7 @@ export const SettingsView = () => {
   const [backups, setBackups] = useState(null);
   const [backupsError, setBackupsError] = useState('');
   const [creatingBackup, setCreatingBackup] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const logoInputRef = useRef(null);
   const qrInputRef = useRef(null);
   const importInputRef = useRef(null);
@@ -107,6 +109,7 @@ export const SettingsView = () => {
     { id: 'ticket', label: 'Ticket & Caja', icon: Receipt },
     { id: 'usuarios', label: 'Usuarios', icon: UsersManagementModal ? undefined : undefined },
     { id: 'respaldo', label: 'Respaldo', icon: Download },
+    { id: 'historial', label: 'Historial', icon: History },
   ];
 
   const handleImageUpload = (name, key, setError) => (e) => {
@@ -189,66 +192,54 @@ export const SettingsView = () => {
     }
   };
 
+  const runRestore = async (parsed) => {
+    setRestoring(true);
+    try {
+      await restoreBackup(parsed, { uploadImage, onProgress: setImportMsg });
+      window.location.reload();
+    } catch (error) {
+      setImportMsg(`${error.message || 'No se pudo restaurar.'} Si quedó a medias, vuelve a restaurar el mismo respaldo.`);
+      setRestoring(false);
+    }
+  };
+
   const handleImport = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = async () => {
+    reader.onload = () => {
+      let parsed;
       try {
-        const parsed = JSON.parse(reader.result);
-        const data = parsed.data || parsed;
-        const keys = Object.keys(data).filter((k) => k.startsWith(BACKUP_PREFIX));
-        if (keys.length === 0) {
-          setImportMsg('El archivo no contiene datos válidos de Antojitos.');
-          return;
-        }
-        const read = (suffix, fallback) => {
-          try { return JSON.parse(data[`${BACKUP_PREFIX}${suffix}`]) ?? fallback; } catch { return fallback; }
-        };
-        const restoredSettings = read('settings', {});
-        // Server backups carry the images apart; older ones inside the settings.
-        for (const [key, name] of [['yapeQr', 'yape-qr'], ['logo', 'logo']]) {
-          const image = parsed.files?.[name] || restoredSettings[key];
-          if (String(image || '').startsWith('data:')) {
-            restoredSettings[key] = await uploadImage(name, image);
-          }
-        }
-        const collections = {
-          users: read('users_list', []),
-          customers: read('customers', []),
-          categories: read('categories', []),
-          cremas: read('cremas', []),
-          menu: read('menu', []),
-          expenses: read('expenses', []),
-          config: [
-            { id: 'settings', value: restoredSettings },
-            { id: 'greeting', value: data[`${BACKUP_PREFIX}greeting`] || '' }
-          ]
-        };
-        const response = await fetch('/api/data/import', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ collections })
-        });
-        if (!response.ok) throw new Error('No se pudo guardar el respaldo en la base de datos');
-        const ordersResponse = await fetch('/api/orders/import', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orders: read('orders', []) })
-        });
-        if (!ordersResponse.ok) throw new Error('No se pudieron guardar los pedidos del respaldo');
-        // This browser's copies are older than the restored data; it reloads from the server.
-        Object.keys(localStorage)
-          .filter((k) => k.startsWith(BACKUP_PREFIX) && !['user', 'theme'].includes(k.slice(BACKUP_PREFIX.length)))
-          .forEach((k) => localStorage.removeItem(k));
-        window.location.reload();
-      } catch (error) {
-        setImportMsg(error.message || 'No se pudo leer el archivo. Verifica que sea un respaldo válido.');
+        parsed = JSON.parse(reader.result);
+      } catch {
+        setImportMsg('No se pudo leer el archivo. Verifica que sea un respaldo válido.');
+        return;
+      }
+      if (confirm('¿Restaurar este respaldo? Reemplaza TODOS los datos actuales (pedidos, carta, caseros, usuarios). No cierres la app mientras termina.')) {
+        runRestore(parsed);
       }
     };
     reader.readAsText(file);
     e.target.value = '';
   };
+
+  const handleRestoreAutomatic = async (backup) => {
+    const when = new Date(backup.createdAt).toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'short' });
+    if (!confirm(`¿Restaurar el respaldo del ${when}? Reemplaza TODOS los datos actuales por los de ese momento. No cierres la app mientras termina.`)) return;
+    setImportMsg('Descargando respaldo…');
+    try {
+      const response = await fetch(`/api/backups/${encodeURIComponent(backup.key)}`);
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(body?.error || 'No se pudo descargar el respaldo');
+      await runRestore(body);
+    } catch (error) {
+      setImportMsg(error.message);
+    }
+  };
+
+  // The nightly copy runs at 03:00; more than two days without one means something failed.
+  const newestBackup = backups?.[0];
+  const backupTooOld = Boolean(newestBackup) && Date.now() - new Date(newestBackup.createdAt).getTime() > 2 * 86_400_000;
 
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 space-y-4 pb-24">
@@ -619,6 +610,8 @@ export const SettingsView = () => {
       )}
 
       {/* ---------------- RESPALDO ---------------- */}
+      {segment === 'historial' && <AuditLogPanel />}
+
       {segment === 'respaldo' && (
         <div className="bg-white dark:bg-stone-900 rounded-3xl p-5 border-2 border-amber-200/90 dark:border-stone-800 space-y-4">
           <SectionTitle icon={Download} title="Respaldo y restauración" hint="Guarda tus datos en un archivo por si cambias de celular o navegador." />
@@ -634,6 +627,7 @@ export const SettingsView = () => {
             <button
               type="button"
               onClick={() => importInputRef.current?.click()}
+              disabled={restoring}
               className="p-4 rounded-2xl bg-stone-900 hover:bg-stone-800 text-amber-400 font-black text-sm flex items-center justify-center gap-2 border border-stone-700"
             >
               <Upload className="w-4 h-4" /> Restaurar respaldo
@@ -649,7 +643,7 @@ export const SettingsView = () => {
           )}
 
           <p className="text-[11px] text-slate-400 dark:text-stone-500">
-            Incluye menú, cremas, clientes, pedidos, gastos, usuarios y toda la configuración.
+            Incluye menú, cremas, clientes, pedidos, gastos, cierres de caja, usuarios y toda la configuración.
           </p>
 
           <div className="border-t border-slate-200 dark:border-stone-800 pt-4 space-y-3">
@@ -668,6 +662,12 @@ export const SettingsView = () => {
               </button>
             </div>
             {backupsError && <p role="alert" className="text-xs font-bold text-red-600">{backupsError}</p>}
+            {!backupsError && backupTooOld && (
+              <p role="alert" className="text-xs font-bold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/30 p-2.5 rounded-xl border border-red-200 dark:border-red-800">
+                El último respaldo automático tiene más de 2 días: el respaldo nocturno puede estar fallando.
+                Toca "Crear respaldo ahora" y avisa al técnico si vuelve a pasar.
+              </p>
+            )}
             {!backupsError && !backups && <p className="text-xs text-slate-500 dark:text-stone-400">Cargando respaldos…</p>}
             {!backupsError && backups?.length === 0 && (
               <p className="text-xs text-slate-500 dark:text-stone-400">Todavía no hay respaldos automáticos.</p>
@@ -679,13 +679,23 @@ export const SettingsView = () => {
                     <span className="font-bold">{new Date(backup.createdAt).toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'short' })}</span>
                     {' · '}{backup.orders} pedidos · {Math.max(1, Math.round((backup.bytes || 0) / 1024))} KB
                   </span>
-                  <a
-                    href={`/api/backups/${encodeURIComponent(backup.key)}`}
-                    download
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-stone-800 font-bold text-slate-700 dark:text-stone-200 hover:bg-amber-100"
-                  >
-                    Descargar
-                  </a>
+                  <span className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleRestoreAutomatic(backup)}
+                      disabled={restoring}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-stone-800 font-bold text-slate-700 dark:text-stone-200 hover:bg-amber-100 disabled:opacity-50"
+                    >
+                      Restaurar
+                    </button>
+                    <a
+                      href={`/api/backups/${encodeURIComponent(backup.key)}`}
+                      download
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-stone-800 font-bold text-slate-700 dark:text-stone-200 hover:bg-amber-100"
+                    >
+                      Descargar
+                    </a>
+                  </span>
                 </li>
               ))}
             </ul>

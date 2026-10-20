@@ -2,13 +2,17 @@
 // per row, so devices only ever save the record they changed.
 
 import { hashPin, publicUser, validPin } from './auth.js';
+import { describeRecord, logChange } from './audit.js';
 
-export const COLLECTIONS = ['users', 'customers', 'categories', 'cremas', 'menu', 'expenses', 'config'];
+export const COLLECTIONS = ['users', 'customers', 'categories', 'cremas', 'menu', 'expenses', 'config', 'closings'];
 const MAX_RECORD_BYTES = 100_000;
 // Helpers can take orders and keep customers, the menu and expenses up to date;
 // users, settings and categories are for the admin only.
 const ADMIN_ONLY = new Set(['users', 'config', 'categories']);
 const FORBIDDEN = 'Solo la administradora puede cambiar esto.';
+// Anyone can close the day's cash register; once closed, only the admin can change it.
+const CLOSED = 'La caja de ese día ya está cerrada. Solo la administradora puede cambiar el cierre.';
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -26,6 +30,10 @@ const validRecord = (collection, item) => {
     // Images are uploaded to /api/files; settings only keep their URL.
     return item.id === 'settings' && item.value && typeof item.value === 'object' &&
       !String(item.value.yapeQr || '').startsWith('data:') && !String(item.value.logo || '').startsWith('data:');
+  }
+  if (collection === 'closings') {
+    return DATE.test(item.date || '') && item.id === `cierre-${item.date}` &&
+      Number.isFinite(item.countedCash) && Number.isFinite(item.expectedCash);
   }
   return true;
 };
@@ -75,35 +83,44 @@ async function changesSince(db, since) {
   return json({ cursor: results.reduce((max, row) => Math.max(max, row.seq), since), records, deleted });
 }
 
-async function importAll(db, collections) {
+// A restore arrives in several requests so a large backup fits D1's limits: the first
+// (`reset`, carrying the users) clears the current records, the rest only add. Collections
+// missing from a request (or from an older backup) are simply empty.
+async function importAll(db, collections, reset, actor) {
   if (!collections || typeof collections !== 'object' ||
-      !COLLECTIONS.every(name => Array.isArray(collections[name]) && collections[name].every(item => validRecord(name, item)))) {
+      !Object.entries(collections).every(([name, list]) =>
+        COLLECTIONS.includes(name) && Array.isArray(list) && list.every(item => validRecord(name, item)))) {
     return json({ error: 'Respaldo inválido' }, 400);
   }
   // Backups made by this version carry no PINs; users that still exist keep theirs.
   const { results: existing } = await db.prepare("SELECT id, data FROM records WHERE collection = 'users' AND deleted = 0").all();
   const currentUsers = new Map(existing.map(row => [row.id, JSON.parse(row.data)]));
   const users = [];
-  for (const user of collections.users) {
+  for (const user of collections.users || []) {
     const hashed = await withPinHash(user, currentUsers.get(user.id), true);
     if (!hashed) return json({ error: `Falta el PIN de ${user.name} en el respaldo` }, 400);
     users.push(hashed);
   }
-  if (!users.some(user => user.role === 'admin')) return json({ error: 'El respaldo no tiene administradora' }, 400);
+  if (reset && !users.some(user => user.role === 'admin')) return json({ error: 'El respaldo no tiene administradora' }, 400);
   collections = { ...collections, users };
   const now = new Date().toISOString();
-  // Shifting every seq past the current maximum keeps them unique and newer than any cursor.
-  const statements = [db.prepare(`UPDATE records SET deleted = 1, data = '{}', updated_at = ?,
-    seq = seq + (SELECT MAX(seq) FROM records) WHERE deleted = 0`).bind(now)];
-  for (const name of COLLECTIONS) {
-    for (const item of collections[name]) {
-      statements.push(db.prepare(`INSERT INTO records (collection, id, data, seq, deleted, updated_at)
-        VALUES (?, ?, ?, ${NEXT_SEQ}, 0, ?)
-        ON CONFLICT(collection, id) DO UPDATE SET data = excluded.data, seq = excluded.seq, deleted = 0, updated_at = excluded.updated_at`)
-        .bind(name, item.id, storedData(item), now));
-    }
+  const statements = [];
+  if (reset) {
+    // Shifting every seq past the current maximum keeps them unique and newer than any cursor.
+    statements.push(db.prepare(`UPDATE records SET deleted = 1, data = '{}', updated_at = ?,
+      seq = seq + (SELECT MAX(seq) FROM records) WHERE deleted = 0`).bind(now));
   }
-  await db.batch(statements);
+  const rows = COLLECTIONS.flatMap(name => (collections[name] || []).map(item => ({ collection: name, id: item.id, data: storedData(item) })));
+  if (rows.length) {
+    statements.push(db.prepare(`INSERT INTO records (collection, id, data, seq, deleted, updated_at)
+      SELECT json_extract(value, '$.collection'), json_extract(value, '$.id'), json_extract(value, '$.data'),
+        (SELECT COALESCE(MAX(seq), 0) FROM records) + key + 1, 0, ?
+      FROM json_each(?) WHERE true
+      ON CONFLICT(collection, id) DO UPDATE SET data = excluded.data, seq = excluded.seq, deleted = 0, updated_at = excluded.updated_at`)
+      .bind(now, JSON.stringify(rows)));
+  }
+  if (statements.length) await db.batch(statements);
+  if (reset) await logChange(db, actor, 'backup', null, 'restaurar', 'Datos restaurados desde un respaldo');
   return json({ ok: true });
 }
 
@@ -121,7 +138,7 @@ export async function handleData(request, db, url, user) {
     if (!isAdmin) return json({ error: FORBIDDEN }, 403);
     const { value, error } = await readBody(request, 1_800_000);
     if (error) return error;
-    return importAll(db, value?.collections);
+    return importAll(db, value?.collections, value?.reset === true, user);
   }
   if (!COLLECTIONS.includes(collection) || rest.length) return json({ error: 'No encontrado' }, 404);
   if (ADMIN_ONLY.has(collection) && !isAdmin) return json({ error: FORBIDDEN }, 403);
@@ -132,9 +149,11 @@ export async function handleData(request, db, url, user) {
     if (error) return error;
     if (!validRecord(collection, value)) return json({ error: 'Datos inválidos' }, 400);
     let item = value;
+    const existing = await db.prepare('SELECT data FROM records WHERE collection = ? AND id = ? AND deleted = 0').bind(collection, value.id).first();
+    const before = existing && JSON.parse(existing.data);
+    if (collection === 'closings' && before && !isAdmin) return json({ error: CLOSED }, 403);
     if (collection === 'users') {
-      const current = await db.prepare("SELECT data FROM records WHERE collection = 'users' AND id = ? AND deleted = 0").bind(value.id).first();
-      item = await withPinHash(value, current && JSON.parse(current.data));
+      item = await withPinHash(value, before);
       if (!item) return json({ error: 'El PIN debe tener 4 números' }, 400);
     }
     // A new record (or one added back after being deleted) is written as sent; a retried
@@ -143,15 +162,23 @@ export async function handleData(request, db, url, user) {
       VALUES (?, ?, ?, ${NEXT_SEQ}, 0, ?)
       ON CONFLICT(collection, id) DO UPDATE SET data = excluded.data, seq = excluded.seq, deleted = 0, updated_at = excluded.updated_at
       RETURNING *`).bind(collection, item.id, storedData(item), new Date().toISOString()).first();
+    // A retried create that changes nothing is not logged twice.
+    if (!before || storedData(before) !== storedData(item)) {
+      await logChange(db, user, collection, item.id, before ? 'editar' : 'crear', describeRecord(collection, item, before));
+    }
     return json({ item: toRecord(row) });
   }
 
   const id = decodeURIComponent(rawId);
   if (!/^[\w-]{1,80}$/.test(id)) return json({ error: 'No encontrado' }, 404);
+  if (collection === 'closings' && !isAdmin) return json({ error: CLOSED }, 403);
   if (request.method === 'DELETE') {
     if (collection === 'users' && !(await adminCount(db, id))) return json({ error: 'Debe quedar al menos una administradora.' }, 400);
+    const existing = await db.prepare('SELECT data FROM records WHERE collection = ? AND id = ? AND deleted = 0').bind(collection, id).first();
+    if (!existing) return json({ ok: true });
     await db.prepare(`UPDATE records SET deleted = 1, data = '{}', updated_at = ?, seq = ${NEXT_SEQ}
       WHERE collection = ? AND id = ? AND deleted = 0`).bind(new Date().toISOString(), collection, id).run();
+    await logChange(db, user, collection, id, 'eliminar', describeRecord(collection, JSON.parse(existing.data)));
     return json({ ok: true });
   }
   if (request.method !== 'PUT') return json({ error: 'Método no permitido' }, 405);
@@ -161,16 +188,21 @@ export async function handleData(request, db, url, user) {
     return json({ error: 'Datos inválidos' }, 400);
   }
   let item = value.item;
+  const existing = await db.prepare('SELECT data FROM records WHERE collection = ? AND id = ? AND deleted = 0').bind(collection, id).first();
+  const before = existing && JSON.parse(existing.data);
   if (collection === 'users') {
-    const current = await db.prepare("SELECT data FROM records WHERE collection = 'users' AND id = ? AND deleted = 0").bind(id).first();
-    item = await withPinHash(value.item, current && JSON.parse(current.data));
+    item = await withPinHash(value.item, before);
     if (!item) return json({ error: 'El PIN debe tener 4 números' }, 400);
     if (item.role !== 'admin' && !(await adminCount(db, id))) return json({ error: 'Debe quedar al menos una administradora.' }, 400);
   }
   const row = await db.prepare(`UPDATE records SET data = ?, updated_at = ?, seq = ${NEXT_SEQ}
     WHERE collection = ? AND id = ? AND seq = ? AND deleted = 0 RETURNING *`)
     .bind(storedData(item), new Date().toISOString(), collection, id, value.baseSeq).first();
-  if (row) return json({ item: toRecord(row) });
+  if (row) {
+    const pinChanged = collection === 'users' && value.item.pin !== undefined;
+    await logChange(db, user, collection, id, 'editar', describeRecord(collection, item, before) + (pinChanged ? ', PIN cambiado' : ''));
+    return json({ item: toRecord(row) });
+  }
   const current = await db.prepare('SELECT * FROM records WHERE collection = ? AND id = ?').bind(collection, id).first();
   if (!current || current.deleted) return json({ error: 'Se eliminó en otro dispositivo', deleted: true }, 410);
   return json({ error: 'Cambió en otro dispositivo', item: toRecord(current) }, 409);

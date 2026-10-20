@@ -2,6 +2,8 @@
   "name": "antojitos-miriam",
   "main": "cloudflare/worker.js",
   "compatibility_date": "2026-10-14",
+  // Workers Logs: errors and the nightly backup result show up in the dashboard.
+  "observability": { "enabled": true },
   "vars": {
     "TEAM_DOMAIN": "https://damp-tooth-4493.cloudflareaccess.com",
     "POLICY_AUD": "57c43c2b119ddbce95fc6ac3348c1e6c3285d7ced89a62ef28953eb32514e671"

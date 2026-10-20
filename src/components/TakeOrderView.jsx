@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { orderNumberText } from '../domain/orders';
 import { 
   Plus, 
   Minus, 
@@ -396,7 +397,7 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
             <div className="bg-gradient-to-r from-stone-900 via-stone-950 to-stone-900 text-white px-4 py-3 border-b border-amber-500/30 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShoppingBag className="w-5 h-5 text-amber-400" />
-                <h2 className="font-black text-base">{accountOrder ? `Agregar a cuenta #${accountOrder.orderNumber}` : 'Pedido en Curso'}</h2>
+                <h2 className="font-black text-base">{accountOrder ? `Agregar a cuenta ${orderNumberText(accountOrder)}` : 'Pedido en Curso'}</h2>
               </div>
               {orderItems.length > 0 && (
                 <button

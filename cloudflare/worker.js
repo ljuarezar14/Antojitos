@@ -1,6 +1,7 @@
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { handleApi } from './api.js';
 import { createBackup } from './backup.js';
+import { logChange, pruneAudit } from './audit.js';
 
 const keySets = new Map();
 function accessKeys(teamDomain) {
@@ -63,7 +64,18 @@ export default {
   },
 
   // Nightly copy of the database (cron in wrangler.jsonc).
+  // A failure is logged (Workers Logs) and noted in the history; Admin › Respaldo warns
+  // when the newest copy is too old.
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(createBackup(env.DB, env.BACKUPS).then(backup => console.log('Respaldo creado', backup.key)));
+    ctx.waitUntil((async () => {
+      try {
+        const backup = await createBackup(env.DB, env.BACKUPS);
+        console.log('Respaldo creado', backup.key);
+      } catch (error) {
+        console.error('Falló el respaldo nocturno', error);
+        await logChange(env.DB, null, 'backup', null, 'error', `Falló el respaldo nocturno: ${error.message}`);
+      }
+      await pruneAudit(env.DB).catch(error => console.error('No se pudo limpiar el historial', error));
+    })());
   }
 };

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { d1 } from '../database/d1.js';
 import { handleData } from './dataApi.js';
 
-// The production path: state saved as one row, then migrations 0002 and 0003.
+// The production path: state saved as one row, then migrations 0002, 0003 and 0005.
 const sqlite = new DatabaseSync(':memory:');
 const migration = name => readFileSync(new URL(`./migrations/${name}`, import.meta.url), 'utf8');
 sqlite.exec(migration('0001_state.sql'));
@@ -22,6 +22,7 @@ sqlite.prepare('UPDATE app_state SET data = ? WHERE id = 1').run(JSON.stringify(
 }));
 sqlite.exec(migration('0002_orders_files.sql'));
 sqlite.exec(migration('0003_records.sql'));
+sqlite.exec(migration('0005_audit.sql'));
 const db = d1(sqlite);
 
 const call = async (method, path, body, user = { role: 'admin' }) => {
@@ -86,7 +87,7 @@ test('el respaldo reemplaza todos los registros', async () => {
     customers: [], categories: [], cremas: [], menu: [], expenses: [],
     config: [{ id: 'settings', value: { businessName: 'Restaurado' } }, { id: 'greeting', value: 'Hola' }]
   };
-  assert.equal((await call('POST', '/api/data/import', { collections })).status, 200);
+  assert.equal((await call('POST', '/api/data/import', { collections, reset: true })).status, 200);
   const { body } = await call('GET', '/api/data?since=0');
   assert.deepEqual(body.records.users.map(user => user.id), ['u9']);
   assert.equal(body.records.cremas.length, 0);
@@ -117,4 +118,41 @@ test('siempre queda una administradora', async () => {
   assert.equal((await call('DELETE', `/api/data/users/${admin.id}`)).status, 400);
   const demote = await call('PUT', `/api/data/users/${admin.id}`, { item: { ...admin, role: 'ayudante' }, baseSeq: admin._seq });
   assert.equal(demote.status, 400);
+});
+
+const closing = (date, countedCash) => ({ id: `cierre-${date}`, date, countedCash, expectedCash: 100, closedBy: 'Lucía' });
+
+test('cualquiera cierra la caja, pero solo la administradora cambia un cierre', async () => {
+  const helper = { id: 'u2', name: 'Lucía', role: 'ayudante' };
+  assert.equal((await call('POST', '/api/data/closings', { id: 'cierre-x', date: '2026-10-18', countedCash: 1, expectedCash: 1 }, helper)).status, 400);
+  const created = await call('POST', '/api/data/closings', closing('2026-10-18', 95), helper);
+  assert.equal(created.status, 200);
+  assert.equal((await call('POST', '/api/data/closings', closing('2026-10-18', 120), helper)).status, 403);
+  assert.equal((await call('PUT', '/api/data/closings/cierre-2026-10-18', { item: closing('2026-10-18', 120), baseSeq: created.body.item._seq }, helper)).status, 403);
+  assert.equal((await call('DELETE', '/api/data/closings/cierre-2026-10-18', null, helper)).status, 403);
+  assert.equal((await call('PUT', '/api/data/closings/cierre-2026-10-18', { item: closing('2026-10-18', 100), baseSeq: created.body.item._seq })).status, 200);
+  const log = sqlite.prepare("SELECT user_name, action, detail FROM audit_log WHERE entity = 'closings' ORDER BY id").all();
+  assert.deepEqual(log.map(row => row.action), ['crear', 'editar']);
+  assert.match(log[0].detail, /contado S\/ 95\.00, esperado S\/ 100\.00/);
+});
+
+test('el historial registra precios cambiados y gastos eliminados', async () => {
+  const { body: added } = await call('POST', '/api/data/expenses', { id: 'e1', date: '2026-10-18', description: 'Hielo', amount: 5 });
+  await call('DELETE', '/api/data/expenses/e1');
+  assert.match(sqlite.prepare("SELECT detail FROM audit_log WHERE entity_id = 'e1' AND action = 'eliminar'").get().detail, /Hielo" S\/ 5\.00/);
+  const { body: product } = await call('POST', '/api/data/menu', { id: 'p5', name: 'Salchipapa', price: 8 });
+  await call('PUT', '/api/data/menu/p5', { item: { ...product.item, price: 9 }, baseSeq: product.item._seq });
+  assert.match(sqlite.prepare("SELECT detail FROM audit_log WHERE entity_id = 'p5' AND action = 'editar'").get().detail, /S\/ 8\.00 → S\/ 9\.00/);
+  assert.ok(added.item);
+});
+
+test('un respaldo grande de registros se restaura en partes', async () => {
+  const users = [{ id: 'u9', name: 'Miriam', role: 'admin' }];
+  assert.equal((await call('POST', '/api/data/import', { collections: { users }, reset: true })).status, 200);
+  const customers = Array.from({ length: 200 }, (_, i) => ({ id: `cl${i}`, name: `Casero ${i}` }));
+  assert.equal((await call('POST', '/api/data/import', { collections: { customers } })).status, 200);
+  const { body } = await call('GET', '/api/data?since=0');
+  assert.equal(body.records.customers.length, 200);
+  assert.deepEqual(body.records.users.map(user => user.id), ['u9']);
+  assert.equal((await call('POST', '/api/data/import', { collections: { customers }, reset: true })).status, 400);
 });

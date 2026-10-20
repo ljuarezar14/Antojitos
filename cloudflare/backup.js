@@ -15,7 +15,8 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), {
 
 const STORAGE_KEYS = {
   users: 'antojitos_miriam_users_list', customers: 'antojitos_miriam_customers', menu: 'antojitos_miriam_menu',
-  cremas: 'antojitos_miriam_cremas', categories: 'antojitos_miriam_categories', expenses: 'antojitos_miriam_expenses'
+  cremas: 'antojitos_miriam_cremas', categories: 'antojitos_miriam_categories', expenses: 'antojitos_miriam_expenses',
+  closings: 'antojitos_miriam_closings'
 };
 
 export async function buildBackup(db) {

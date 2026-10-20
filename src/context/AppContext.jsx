@@ -116,13 +116,13 @@ try {
 
 const sortOrders =list => [...list].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
-const withOrderStatus = (order, status, at = new Date().toISOString()) => {
+const withOrderStatus = (order, status, at = new Date().toISOString(), by = '') => {
   if (order.status === status) return order;
   return {
     ...order,
     status,
     updatedAt: at,
-    statusHistory: [...(order.statusHistory || []), { status, at }]
+    statusHistory: [...(order.statusHistory || []), { status, at, ...(by && { by }) }]
   };
 };
 
@@ -164,9 +164,13 @@ export const AppProvider = ({ children }) => {
     fallback: [{ id: 'settings', value: DEFAULT_SETTINGS }, { id: 'greeting', value: DEFAULT_GREETING_MESSAGE }],
     describe: item => item.id === 'settings' ? 'La configuración del negocio' : 'El mensaje de saludo'
   });
+  // One record per day the cash register was closed (cierre-YYYY-MM-DD).
+  const closingsStore = useSyncedCollection({
+    storageKey: 'antojitos_miriam_closings', path: '/api/data/closings', fallback: [], describe: closing => `El cierre de caja del ${closing.date}`
+  });
   const dataStores = {
     users: usersStore, customers: customersStore, categories: categoriesStore, cremas: cremasStore,
-    menu: menuStore, expenses: expensesStore, config: configStore
+    menu: menuStore, expenses: expensesStore, config: configStore, closings: closingsStore
   };
   const allStores = [ordersStore, ...Object.values(dataStores)];
 
@@ -178,6 +182,9 @@ export const AppProvider = ({ children }) => {
   const { list: orders, setList: setOrders } = ordersStore;
   const { list: expenses, setList: setExpenses } = expensesStore;
   const { list: config, setList: setConfig } = configStore;
+  const { list: closings, setList: setClosings } = closingsStore;
+  // Who did it, shown on the order and in the receipt; the server keeps its own history too.
+  const by = () => currentUser?.name || '';
 
   const setConfigValue = (id, update) => setConfig(previous => {
     const current = previous.find(item => item.id === id);
@@ -493,7 +500,8 @@ export const AppProvider = ({ children }) => {
       status: 'recibido',
       payment: null,
       ...orderData,
-      statusHistory: [{ status: 'recibido', at: createdAt }]
+      createdBy: by(),
+      statusHistory: [{ status: 'recibido', at: createdAt, by: by() }]
     };
 
     setOrders(prev => [newOrder, ...prev]);
@@ -525,7 +533,7 @@ export const AppProvider = ({ children }) => {
         if (newStatus === 'listo' && order.status !== 'listo') {
           triggerAudio('ready');
         }
-        return withOrderStatus(order, newStatus);
+        return withOrderStatus(order, newStatus, undefined, by());
       }
       return order;
     }));
@@ -537,11 +545,12 @@ export const AppProvider = ({ children }) => {
       if (order.id !== orderId) return order;
       const paidAt = new Date().toISOString();
       return {
-        ...withOrderStatus(order, 'entregado', paidAt),
+        ...withOrderStatus(order, 'entregado', paidAt, by()),
         openAccount: false,
         payment: {
           ...paymentData,
-          paidAt
+          paidAt,
+          by: by()
         }
       };
     }));
@@ -556,7 +565,7 @@ export const AppProvider = ({ children }) => {
         !name || name.toLowerCase() === 'cliente al paso') return false;
     const now = new Date().toISOString();
     setOrders(previous => previous.map(item => item.id === orderId ? {
-      ...withOrderStatus(item, 'entregado', now), customerName: name, customerPhone: debtorPhone.trim(),
+      ...withOrderStatus(item, 'entregado', now, by()), customerName: name, customerPhone: debtorPhone.trim(),
       openAccount: false,
       debt: { createdAt: now }, debtPayments: []
     } : item));
@@ -573,12 +582,12 @@ export const AppProvider = ({ children }) => {
     setOrders(previous => previous.map(item => {
       if (item.id !== orderId) return item;
       const debtPayments = [...(item.debtPayments || []), {
-        id: `abono-${crypto.randomUUID()}`, amount: cents / 100, method, paidAt: now
+        id: `abono-${crypto.randomUUID()}`, amount: cents / 100, method, paidAt: now, by: by()
       }];
       return {
         ...item, debtPayments, updatedAt: now,
         payment: debtBalance({ ...item, debtPayments }) === 0 ? {
-          method, amountPaid: item.total, change: 0, paidAt: now
+          method, amountPaid: item.total, change: 0, paidAt: now, by: by()
         } : null
       };
     }));
@@ -588,14 +597,17 @@ export const AppProvider = ({ children }) => {
   const cancelOrder = (orderId) => {
     setOrders(prev => prev.map(order => {
       if (order.id === orderId) {
-        return withOrderStatus(order, 'cancelado');
+        return withOrderStatus(order, 'cancelado', undefined, by());
       }
       return order;
     }));
   };
 
+  // Only the admin can delete an order (the server refuses anyone else); helpers cancel.
   const deleteOrder = (orderId) => {
+    if (currentUser?.role !== 'admin') return false;
     setOrders(prev => prev.filter(order => order.id !== orderId));
+    return true;
   };
 
   // Customers Management Actions
@@ -632,7 +644,8 @@ export const AppProvider = ({ children }) => {
       date: filterDate,
       description: description.trim(),
       amount: parseFloat(amount) || 0,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      createdBy: by()
     };
     setExpenses(prev => [newExpense, ...prev]);
   };
@@ -774,6 +787,29 @@ export const AppProvider = ({ children }) => {
     .map(([name, data]) => ({ name, ...data }))
     .sort((a, b) => b.count - a.count);
 
+  // Cash closing: the money counted at the end of the day against what the register says
+  // should be there. The figures are kept as they were, so later edits show up as changes.
+  const round = value => Math.round(value * 100) / 100;
+  const initialCash = Number(settings.initialCash) || 0;
+  const expectedCash = round(initialCash + cashSales - totalExpenses);
+  const dayClosing = closings.find(closing => closing.date === filterDate) || null;
+  const closeCashRegister = ({ countedCash, notes = '' }) => {
+    const counted = round(Number(countedCash));
+    if (!Number.isFinite(counted) || counted < 0 || dayClosing) return false;
+    setClosings(previous => [...previous, {
+      id: `cierre-${filterDate}`, date: filterDate, countedCash: counted, expectedCash,
+      difference: round(counted - expectedCash), initialCash, cashSales: round(cashSales), yapePlinSales: round(yapePlinSales),
+      cardOtherSales: round(cardOtherSales), totalSales: round(totalSales), totalExpenses: round(totalExpenses),
+      payments: dailyPayments.length, notes: notes.trim(), closedBy: by(), closedAt: new Date().toISOString()
+    }]);
+    return true;
+  };
+  const reopenCashRegister = date => {
+    if (currentUser?.role !== 'admin') return false;
+    setClosings(previous => previous.filter(closing => closing.date !== date));
+    return true;
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -853,6 +889,10 @@ export const AppProvider = ({ children }) => {
         totalExpenses,
         netProfit,
         dishesRanking,
+        expectedCash,
+        dayClosing,
+        closeCashRegister,
+        reopenCashRegister,
         todayDateStr: getLocalDateString(),
       }}
     >

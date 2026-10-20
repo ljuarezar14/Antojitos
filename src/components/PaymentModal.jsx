@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { orderNumberText } from '../domain/orders';
 import confetti from 'canvas-confetti';
 import { 
   X, 
@@ -65,7 +66,7 @@ export const PaymentModal = ({ order, onClose }) => {
         <div className="bg-stone-900 text-white p-4 border-b border-amber-500/20 flex items-center justify-between">
           <div>
             <span className="text-xs font-black text-amber-400 uppercase tracking-wider">
-              Cobrar Pedido #{order.orderNumber}
+              Cobrar Pedido {orderNumberText(order)}
             </span>
             <h3 className="font-black text-lg text-white">
               {order.customerName || 'Cliente al paso'}

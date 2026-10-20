@@ -15,6 +15,7 @@ sqlite.prepare('UPDATE app_state SET data = ? WHERE id = 1').run(JSON.stringify(
   ]
 }));
 sqlite.exec(readFileSync(new URL('./migrations/0002_orders_files.sql', import.meta.url), 'utf8'));
+sqlite.exec(readFileSync(new URL('./migrations/0005_audit.sql', import.meta.url), 'utf8'));
 const db = d1(sqlite);
 
 const call = async (handler, method, path, body) => {
@@ -75,7 +76,7 @@ test('los cambios y eliminaciones llegan a los demás dispositivos', async () =>
 
 test('el respaldo reemplaza los pedidos conservando sus números', async () => {
   const restored = [order('r1', { orderNumber: 7 }), order('r2', { orderNumber: 1 })];
-  assert.equal((await call(handleOrders, 'POST', '/api/orders/import', { orders: restored })).status, 200);
+  assert.equal((await call(handleOrders, 'POST', '/api/orders/import', { orders: restored, reset: true })).status, 200);
   const { body } = await call(handleOrders, 'GET', '/api/orders?since=0');
   assert.deepEqual(body.orders.map(o => [o.id, o.orderNumber]).sort(), [['r1', 7], ['r2', 1]]);
 });
@@ -93,4 +94,41 @@ test('una ayudante no puede cambiar el QR ni restaurar pedidos', async () => {
   assert.equal((await handleFiles(new Request(url), db, url, helper)).status, 200);
   const importUrl = new URL('https://example.com/api/orders/import');
   assert.equal((await handleOrders(new Request(importUrl, { method: 'POST', body: '{"orders":[]}' }), db, importUrl, helper)).status, 403);
+});
+
+test('una ayudante no puede eliminar pedidos, solo cancelarlos', async () => {
+  await call(handleOrders, 'POST', '/api/orders', order('h1'));
+  const url = new URL('https://example.com/api/orders/h1');
+  const helper = { id: 'u2', name: 'Lucía', role: 'ayudante' };
+  assert.equal((await handleOrders(new Request(url, { method: 'DELETE' }), db, url, helper)).status, 403);
+  assert.ok((await call(handleOrders, 'GET', '/api/orders?since=0')).body.orders.some(o => o.id === 'h1'));
+});
+
+test('cada cambio de pedido queda en el historial con quién lo hizo', async () => {
+  const lucia = { id: 'u2', name: 'Lucía', role: 'ayudante' };
+  const as = async (method, path, body) => {
+    const url = new URL(path, 'https://example.com');
+    const response = await handleOrders(new Request(url, { method, body: JSON.stringify(body) }), db, url, lucia);
+    return response.json();
+  };
+  const { order: created } = await as('POST', '/api/orders', order('a1', { customerName: 'Rosa' }));
+  await as('PUT', '/api/orders/a1', {
+    order: { ...created, status: 'entregado', payment: { method: 'yape', amountPaid: 6 } }, baseSeq: created._seq
+  });
+  const log = sqlite.prepare("SELECT user_name, action, detail FROM audit_log WHERE entity_id = 'a1' ORDER BY id").all();
+  assert.deepEqual(log.map(row => [row.user_name, row.action]), [['Lucía', 'crear'], ['Lucía', 'editar']]);
+  assert.match(log[1].detail, /Rosa.*cobrado S\/ 6\.00 en yape/);
+  await call(handleOrders, 'DELETE', '/api/orders/a1');
+  assert.match(sqlite.prepare("SELECT detail FROM audit_log WHERE action = 'eliminar' AND entity_id = 'a1'").get().detail, /cobrado en yape/);
+});
+
+test('un respaldo grande se restaura en varias partes', async () => {
+  const first = Array.from({ length: 300 }, (_, i) => order(`p${i}`, { orderNumber: i + 1 }));
+  const second = Array.from({ length: 300 }, (_, i) => order(`q${i}`, { orderNumber: i + 301 }));
+  assert.equal((await call(handleOrders, 'POST', '/api/orders/import', { orders: first, reset: true })).status, 200);
+  assert.equal((await call(handleOrders, 'POST', '/api/orders/import', { orders: second })).status, 200);
+  const { body } = await call(handleOrders, 'GET', '/api/orders?since=0');
+  assert.equal(body.orders.length, 600);
+  assert.equal(new Set(body.orders.map(o => o._seq)).size, 600);
+  assert.equal(body.orders.find(o => o.id === 'q299').orderNumber, 600);
 });

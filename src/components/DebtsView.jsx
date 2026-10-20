@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { orderNumberText } from '../domain/orders';
 import { debtBalance } from '../domain/finance';
 
 const methods = [
@@ -55,7 +56,7 @@ export const DebtsView = () => {
           <div key={order.id} className="rounded-2xl bg-white dark:bg-stone-900 border border-amber-200 dark:border-stone-800 p-4 space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <h3 className="font-black text-slate-900 dark:text-white">{order.customerName} · Pedido #{order.orderNumber}</h3>
+                <h3 className="font-black text-slate-900 dark:text-white">{order.customerName} · Pedido {orderNumberText(order)}</h3>
                 <p className="text-xs text-slate-500 dark:text-stone-400">{order.date}{order.customerPhone ? ` · ${order.customerPhone}` : ''}</p>
               </div>
               <span className={`font-black ${balance ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>

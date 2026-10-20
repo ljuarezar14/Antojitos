@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { orderNumberText } from '../domain/orders';
 import { debtBalance } from '../domain/finance';
 import { 
   X, 
@@ -31,7 +32,7 @@ export const ReceiptModal = ({ order, onClose }) => {
       `🍔 *${bizName}* 🍗`,
       `*${subtitle}*`,
       `---------------------------------`,
-      `*Ticket:* #${order.orderNumber}`,
+      `*Ticket:* ${orderNumberText(order)}`,
       `*Cliente:* ${order.customerName || 'Cliente al paso'}`,
       `*Modalidad:* ${order.orderType === 'llevar' ? 'Para Llevar' : 'Para Comer Aquí'}`,
       `*Fecha:* ${formattedDate}`,
@@ -119,7 +120,7 @@ export const ReceiptModal = ({ order, onClose }) => {
 
           <div className="border-t border-b border-dashed border-slate-400 py-2 flex justify-between items-center">
             <div>
-              <p className="font-black text-slate-900">Pedido #{order.orderNumber}</p>
+              <p className="font-black text-slate-900">Pedido {orderNumberText(order)}</p>
               <p className="text-[10px] text-slate-600">{order.customerName || 'Cliente'}</p>
             </div>
             <div className="text-right">

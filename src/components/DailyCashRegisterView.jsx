@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { CashClosingCard } from './CashClosingCard';
 import { 
   DollarSign, 
   Coins, 
@@ -38,7 +39,8 @@ export const DailyCashRegisterView = () => {
     deleteExpense,
     settings,
     dbError,
-    pendingChanges
+    pendingChanges,
+    dayClosing
   } = useApp();
 
   const [expenseDesc, setExpenseDesc] = useState('');
@@ -127,6 +129,15 @@ export const DailyCashRegisterView = () => {
     lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━`);
     lines.push(`✨ *RESULTADO DEL DÍA (COBROS - GASTOS):* S/ ${netProfit.toFixed(2)} ✨`);
     lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
+    if (dayClosing) {
+      const diff = dayClosing.difference;
+      lines.push(`🔒 *Caja cerrada por ${dayClosing.closedBy || "—"}*`);
+      lines.push(`  • Efectivo esperado: S/ ${dayClosing.expectedCash.toFixed(2)}`);
+      lines.push(`  • Efectivo contado: S/ ${dayClosing.countedCash.toFixed(2)}`);
+      lines.push(`  • ${diff === 0 ? "Cuadra exacto" : diff > 0 ? `Sobran S/ ${diff.toFixed(2)}` : `Faltan S/ ${(-diff).toFixed(2)}`}`);
+      lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    }
 
     if (dishesRanking.length > 0) {
       lines.push(`🏆 *Platos Más Vendidos:*`);
@@ -380,6 +391,8 @@ export const DailyCashRegisterView = () => {
       </div>
 
       {reportError && <div role="alert" className="rounded-xl bg-red-900 px-4 py-3 text-sm font-bold text-white">{reportError}</div>}
+
+      <CashClosingCard />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         

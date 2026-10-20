@@ -104,12 +104,12 @@ test('un respaldo automático restaura todo en una base vacía, PIN incluidos', 
     menu: read('menu'), expenses: read('expenses'),
     config: [{ id: 'settings', value: read('settings') }, { id: 'greeting', value: backup.data.antojitos_miriam_greeting }]
   };
-  assert.equal((await call(fresh, 'POST', '/api/data/import', { body: { collections }, cookie: temp })).status, 200);
+  assert.equal((await call(fresh, 'POST', '/api/data/import', { body: { collections, reset: true }, cookie: temp })).status, 200);
   assert.equal((await call(fresh, 'POST', '/api/orders/import', { body: { orders: read('orders') } })).status, 401);
   const restoredAdmin = read('users_list').find(user => user.role === 'admin');
   const login = await call(fresh, 'POST', '/api/session', { body: { userId: restoredAdmin.id, pin: '2468' } });
   assert.equal(login.status, 200);
-  assert.equal((await call(fresh, 'POST', '/api/orders/import', { body: { orders: read('orders') }, cookie: login.cookie })).status, 200);
+  assert.equal((await call(fresh, 'POST', '/api/orders/import', { body: { orders: read('orders'), reset: true }, cookie: login.cookie })).status, 200);
   assert.equal((await call(fresh, 'GET', '/api/orders?since=0', { cookie: login.cookie })).body.orders.length, 4);
 });
 

@@ -11,7 +11,7 @@ function serviceWorker() {
     apply: 'build',
     generateBundle(_, bundle) {
       const files = Object.keys(bundle).filter(file => file !== 'index.html' && !file.endsWith('.map')).map(file => `/${file}`)
-      const precache = ['/', '/logo.png', '/manifest.webmanifest', ...files]
+      const precache = ['/', '/logo.png', '/icon-192.png', '/manifest.webmanifest', ...files]
       const version = createHash('sha256').update(precache.join('\n')).digest('hex').slice(0, 12)
       const source = readFileSync(new URL('./sw/service-worker.js', import.meta.url), 'utf8')
         .replace('__VERSION__', version)

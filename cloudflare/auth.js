@@ -1,6 +1,8 @@
 // PINs are checked here and never sent to the browser. A correct PIN opens a session
 // kept in an HttpOnly cookie; every other /api route requires one.
 
+import { logChange } from './audit.js';
+
 const COOKIE = 'am_session';
 const SESSION_DAYS = 30;
 const MAX_FAILURES = 5;
@@ -107,6 +109,7 @@ async function login(db, url, userId, pin) {
       lockedUntil ? 429 : 401);
   }
   await db.prepare('DELETE FROM login_failures WHERE user_id = ?').bind(userId).run();
+  await logChange(db, user, 'session', user.id, 'ingresar', `${user.name} ingresó con su PIN`);
   return startSession(db, url, user);
 }
 

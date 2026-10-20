@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { LoginView } from './components/LoginView';
@@ -13,6 +13,28 @@ import { SettingsView } from './components/SettingsView';
 import { DebtsView } from './components/DebtsView';
 import { OpenAccountsView } from './components/OpenAccountsView';
 import { Sparkles, HelpCircle, X } from 'lucide-react';
+
+const UPDATE_READY = 'antojitos:update-ready';
+
+// Shown when a new version was deployed while this page was open. Unsent changes are kept
+// on the device, so reloading is always safe.
+const UpdateBanner = () => {
+  const [ready, setReady] = useState(() => Boolean(window.antojitosUpdateReady));
+  useEffect(() => {
+    const show = () => setReady(true);
+    window.addEventListener(UPDATE_READY, show);
+    return () => window.removeEventListener(UPDATE_READY, show);
+  }, []);
+  if (!ready) return null;
+  return (
+    <div role="status" className="fixed top-3 left-3 right-3 z-[60] mx-auto max-w-md rounded-2xl bg-amber-500 text-stone-950 shadow-xl p-3 flex items-center justify-between gap-3">
+      <span className="text-sm font-bold">Hay una versión nueva de la aplicación.</span>
+      <button type="button" onClick={() => window.location.reload()} className="shrink-0 rounded-xl bg-stone-950 px-3 py-2 text-xs font-black text-amber-400">
+        Actualizar
+      </button>
+    </div>
+  );
+};
 
 const MainContent = () => {
   const { currentUser, activeTab, theme, dbReady, dataReady, offline, dbError: stateError, syncError, orders } = useApp();
@@ -161,6 +183,7 @@ const MainContent = () => {
 export default function App() {
   return (
     <AppProvider>
+      <UpdateBanner />
       <MainContent />
     </AppProvider>
   );

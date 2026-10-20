@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { isProvisional, orderNumberText } from '../domain/orders';
 import { debtBalance } from '../domain/finance';
 import { 
   Clock, 
@@ -212,6 +213,12 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
                       <h4 className="font-black text-sm text-slate-900 dark:text-white leading-tight">
                         {order.customerName || 'Cliente'}
                       </h4>
+                      {isProvisional(order) && (
+                        <p className="text-[10px] font-black text-amber-700 dark:text-amber-400" title="Se tomó sin señal: el número final llega al conectarse">
+                          N.º provisional
+                        </p>
+                      )}
+                      {order.createdBy && <p className="text-[10px] text-slate-400 dark:text-stone-500">Tomó: {order.createdBy}{order.payment?.by ? ` · Cobró: ${order.payment.by}` : ''}</p>}
                       <p className="text-[11px] text-slate-500 dark:text-stone-400 flex items-center gap-1 font-medium">
                         <Clock className="w-3 h-3 text-slate-400 dark:text-stone-500" />
                         {getElapsedMinutes(order.createdAt)}
@@ -396,7 +403,7 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
                           setDebtError('Escribe el nombre de la persona que debe.');
                           return;
                         }
-                        if (!confirm(`¿Entregar el pedido #${order.orderNumber} fiado a ${name}? Quedarán S/ ${order.total.toFixed(2)} por cobrar.`)) return;
+                        if (!confirm(`¿Entregar el pedido ${orderNumberText(order)} fiado a ${name}? Quedarán S/ ${order.total.toFixed(2)} por cobrar.`)) return;
                         if (markOrderAsDebt(order.id, name, debtDraft.phone)) {
                           setDebtDraft(null);
                           setActiveTab('deudas');

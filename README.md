@@ -6,17 +6,11 @@
 
 ## 🚀 ¿Cómo abrir la aplicación?
 
-1. **En tu computadora o laptop:**
-   - Abre tu navegador (Chrome, Edge) e ingresa a: **`http://localhost:3000`**
-
-2. **En tu celular (mientras estás en la carretilla o en casa conectado al mismo WiFi):**
-   - Abre el navegador de tu celular e ingresa a: **`http://192.168.18.26:3000`**
-   - *(En el celular puedes darle a los 3 puntitos de Chrome -> "Agregar a la pantalla principal" y se instalará como una App con tu logo oficial).*
-
-3. **Para iniciarla en el futuro desde la terminal:**
-   ```bash
-   npm run dev
-   ```
+1. Abre en el celular la dirección de la app en Cloudflare (la misma que usas hoy) e ingresa con Cloudflare Access.
+2. Elige tu nombre y escribe tu **PIN de 4 números**.
+3. **Instálala**: en Chrome toca los 3 puntitos → **Agregar a la pantalla principal**. Queda como una app con el logo.
+4. **Sin señal**: si ya ingresaste una vez con señal, la app abre igual y guarda los pedidos en el celular. Se envían solos al volver la señal. Un pedido tomado sin señal muestra **"N.º provisional"**: su número final lo da el servidor al conectarse.
+5. **Versión nueva**: cuando se publica una actualización aparece arriba el aviso **"Hay una versión nueva"**. Toca **Actualizar**; los cambios sin enviar no se pierden.
 
 ---
 
@@ -29,18 +23,29 @@
 
 ---
 
-## 👥 Crear Nuevos Usuarios y Gestionar PINs
+## 👥 Usuarios, PIN y permisos
 
-Ahora tienes el control total para crear nuevos accesos para quienes te ayuden a atender:
 1. Ingresa como administradora.
-2. Abre **Configuración → Usuarios** o el ícono **Usuarios** de la barra superior.
-3. **Funciones**:
-   - **➕ Crear Nuevo Usuario**: Escribe su nombre (ej. *"Lucía Hija"*, *"Pedro Mozo"*), elige su rol (*Dueña / Admin* o *Ayudante*), asígnale un **PIN de 4 dígitos** y escoge un ícono.
-   - **👁️ Ver u Ocultar PIN**: Toca el ojo para ver qué clave tiene cada ayudante.
-   - **✏️ Editar o Cambiar Clave**: Modifica el PIN en cualquier momento.
-   - **🗑️ Eliminar Usuario**: Elimina usuarios antiguos con total seguridad.
+2. Abre **Admin → Usuarios**.
+3. **Crear usuario**: nombre, rol (*Administradora* o *Ayudante*), PIN de 4 números e ícono.
+4. **Cambiar PIN**: edita al usuario y escribe el nuevo PIN. Los PIN se guardan cifrados en el servidor: nadie puede verlos, ni la administradora. Si alguien lo olvida, ponle uno nuevo.
 
-Al abrir una base de datos nueva, crea la administradora y elige su PIN de 4 dígitos. No hay PINs de fábrica.
+Después de 5 PIN incorrectos, ese usuario queda bloqueado 5 minutos.
+
+**Qué puede hacer cada rol:**
+
+| | Ayudante | Administradora |
+|---|---|---|
+| Tomar, preparar, cobrar y fiar pedidos | ✅ | ✅ |
+| Cancelar pedidos (siguen visibles como cancelados) | ✅ | ✅ |
+| **Eliminar** pedidos | ❌ | ✅ |
+| Caseros, carta, cremas y gastos | ✅ | ✅ |
+| Cerrar la caja del día | ✅ | ✅ |
+| Cambiar o reabrir una caja ya cerrada | ❌ | ✅ |
+| Usuarios, categorías, ajustes, QR y logo | ❌ | ✅ |
+| Respaldos e historial de cambios | ❌ | ✅ |
+
+Una base de datos nueva empieza sin usuarios: la primera persona crea la administradora. Siempre debe quedar al menos una administradora.
 
 ---
 
@@ -92,30 +97,56 @@ Al abrir una base de datos nueva, crea la administradora y elige su PIN de 4 dí
 - **Resultado del día**: Muestra `Cobros recibidos - Gastos registrados`. Los pedidos fiados se suman cuando se cobra cada abono.
 - **📲 Enviar Cierre por WhatsApp**: Con 1 clic genera un reporte listo y bonito con emojis para enviártelo a tu WhatsApp personal.
 - **📄 Descargar cierre PDF**: En **Caja**, elige la fecha y pulsa **Descargar cierre PDF**. Incluye resumen, cobros por método de pago, gastos, platos entregados, detalle de pagos y abonos, y una tabla de deudas pendientes con nombre, teléfono y saldo de cada cliente. El saldo corresponde al final de la fecha elegida. Se genera a partir de los datos ya guardados en la base; si hay cambios pendientes o un error de guardado, la aplicación pide esperar o resolverlo antes de descargar.
+- **🔒 Cerrar caja**: al final del día cuenta el efectivo y escríbelo en **Cerrar caja**. La app muestra el efectivo esperado (fondo inicial + cobros en efectivo − gastos) y si **cuadra**, **sobra** o **falta**. El cierre queda guardado con quién lo hizo y a qué hora. Si después alguien cambia un pedido o un gasto de ese día, el cierre avisa que los totales cambiaron. Solo la administradora puede reabrir una caja cerrada.
 - **Cuentas abiertas**: En **Tomar Pedido**, escribe el nombre, agrega los productos y pulsa **Abrir cuenta para cobrar al retirarse**. En **Cuentas Abiertas** puedes agregar más consumos a la misma cuenta, ver el total acumulado y cobrar todo junto. Una cuenta abierta no figura como cobrada ni como deuda mientras el cliente sigue consumiendo; permanece visible aunque cambie la fecha.
 - **Deudas y abonos**: En **Pedidos Activos**, marca el pedido como listo y elige **Entregar fiado**. Allí puedes escribir el nombre y teléfono del deudor aunque el pedido se haya creado como «Cliente al paso». En **Deudas** verás el saldo y podrás registrar pagos parciales o completos. El abono se cuenta en **Caja** el día en que recibes el dinero; el pedido fiado no figura como cobrado antes de eso. El PDF del cierre incluye los abonos y el saldo pendiente al final de la fecha elegida.
 
+### 6. 🕵️ Historial de cambios (Admin → Historial)
+- Muestra, día por día, **quién** tomó, cobró, fió, canceló o eliminó cada pedido, quién registró o borró un gasto, cambió un precio, cerró la caja, ingresó con su PIN o restauró un respaldo.
+- El servidor lo anota con el usuario que tenía la sesión abierta, así que no se puede falsear desde un celular. Se guarda 6 meses.
+- Sirve para aclarar una diferencia de caja: filtra **Pedidos y caja** y revisa ese día.
+
 ---
 
-## 🗄️ Base de datos y despliegue
+## 💾 Respaldos (Admin → Respaldo)
 
-### Desarrollo local
+- **Automáticos**: cada madrugada (3:00 a. m.) el servidor guarda una copia completa (pedidos, carta, caseros, gastos, cierres, usuarios con sus PIN cifrados, QR y logo). Se conservan 90 días.
+- **Crear respaldo ahora**: haz uno antes de cualquier cambio grande.
+- **Descargar respaldo**: baja un archivo `.json`. Guarda copias fuera del celular (correo, Drive).
+- **Restaurar**: desde un archivo o directamente desde un respaldo automático de la lista. **Reemplaza todos los datos actuales.** Se envía por partes, así funciona aunque haya años de pedidos. No cierres la app mientras termina; si se corta, vuelve a restaurar el mismo respaldo.
+- Si el último respaldo automático tiene más de 2 días, la pantalla muestra un aviso en rojo.
 
-`npm run dev` usa SQLite local en `database/antojitos.sqlite` (Node.js 22 o posterior). El esquema relacional está en `database/schema.sql`. Una instalación nueva empieza sin clientes, pedidos, gastos ni usuarios; la primera persona crea la administradora. Si este navegador ya tenía datos en `localStorage`, se importan en la primera apertura de una base vacía. Revisa que no sean datos de prueba antes de usarlos.
+---
 
-El servidor Node de producción se inicia con `npm run build` y `npm start`. Requiere `ANTOJITOS_ACCESS_PASSWORD` de al menos 16 caracteres y acepta `ANTOJITOS_ACCESS_USER` (por defecto `miriam`), `PORT`, `HOST` y `ANTOJITOS_DB_PATH`. Usa un disco persistente para el archivo SQLite y sirve el proceso detrás de HTTPS. La contraseña HTTP protege tanto la web como `/api/state`.
+## 🗄️ Para el técnico: arquitectura y despliegue
 
-### Cloudflare gratuito (recomendado si ya usas Cloudflare)
+**Producción: Cloudflare.** Un Worker (`cloudflare/worker.js`) sirve la app (`dist/`) y la API `/api/*`. Los datos están en **D1** y los respaldos en **Workers KV**. Cloudflare Access protege todo (`TEAM_DOMAIN` y `POLICY_AUD` en `wrangler.jsonc`); como alternativa, el secreto `ACCESS_PASSWORD` activa la contraseña HTTP.
 
-Cloudflare Workers sirve la aplicación y Cloudflare D1 guarda su estado. Este modo usa `cloudflare/worker.js`, `cloudflare/migrations/0001_state.sql` y `wrangler.jsonc`. D1 guarda un documento con revisión atómica para impedir sobrescrituras entre dispositivos. El documento tiene un límite operativo de 1,8 MB; exporta respaldos periódicos y planifica pasar a almacenamiento por registros cuando el historial crezca. El SQLite local y D1 son alternativas de despliegue, no se sincronizan automáticamente.
+| Pieza | Dónde |
+|---|---|
+| Rutas de la API | `cloudflare/api.js` |
+| PIN, sesiones (cookie HttpOnly, 30 días) y bloqueo | `cloudflare/auth.js` |
+| Pedidos: uno por fila, número del día asignado por el servidor | `cloudflare/ordersApi.js` |
+| Caseros, carta, cremas, categorías, gastos, ajustes, usuarios y cierres: un registro por fila | `cloudflare/dataApi.js` |
+| Historial de cambios | `cloudflare/audit.js` |
+| Respaldos en KV y cron nocturno | `cloudflare/backup.js`, `scheduled` en `worker.js` |
+| Migraciones de D1 | `cloudflare/migrations/` |
+| Sincronización en el celular (cola de cambios, sin señal, conflictos) | `src/sync/useSyncedCollection.js` |
+| Funcionamiento sin señal (service worker) | `sw/service-worker.js` |
 
-1. En Cloudflare, crea una base D1 llamada `antojitos-miriam`: `npx wrangler d1 create antojitos-miriam`. Copia el `database_id` devuelto en `wrangler.jsonc`.
-2. Ejecuta `npm run cloud:migrate` para crear la tabla remota.
-3. Elige una protección de acceso:
-   - **Sin tarjeta:** ejecuta `npx wrangler secret put ACCESS_PASSWORD` e introduce una contraseña única de al menos 16 caracteres. El usuario HTTP es `miriam`, salvo que configures `ACCESS_USER`. La contraseña protege la web y `/api/state` mediante HTTPS. Guárdala en un gestor de contraseñas y compártela únicamente con personas de plena confianza.
-   - **Cloudflare Zero Trust Free:** Cloudflare solicita datos de pago para activar Zero Trust, aunque indica que el plan Free no se cobra. Protege **todo el Worker, producción y vistas previas**, con Cloudflare Access y permite solo correos de confianza. Configura `TEAM_DOMAIN` (por ejemplo `https://equipo.cloudflareaccess.com`) y `POLICY_AUD` (Audience tag) en el Worker. La API verifica el token de Access. Si configuras también `ACCESS_PASSWORD`, prevalece la contraseña HTTP.
-4. Ejecuta `npm run cloud:deploy`. Comprueba que la web y `/api/state` solicitan acceso y que los cambios permanecen tras recargar.
+Cada cambio se guarda registro por registro con control de versión: si dos celulares editan el mismo pedido, el segundo recibe la versión nueva y se le pide repetir su cambio, sin pisar el del otro. Cada celular guarda los últimos 60 días de pedidos (más deudas, cuentas abiertas y pedidos en curso); los días anteriores se piden al servidor al consultarlos.
 
-El PIN dentro de la aplicación sirve para seleccionar la sesión y el rol en la interfaz. Las personas admitidas por la contraseña HTTP o por Cloudflare Access pueden acceder a la API completa, incluidos los PINs; concede ese acceso solo a personas de plena confianza. Para separar permisos de ayudantes de forma segura hace falta autenticación y autorización por usuario en el servidor.
+**Desplegar una versión nueva:**
 
-Los cambios se guardan con revisión. Si otro dispositivo guardó primero, aparece un error y se necesita recargar antes de seguir. Usa **Configuración → Respaldo** para exportar un JSON de tus datos; conserva copias fuera del servidor. En SQLite también puedes copiar el archivo de base de datos con el servidor detenido. No se incluye en Git.
+```bash
+npm test                                  # pruebas del servidor
+npx wrangler d1 export antojitos-miriam --remote --output respaldo.sql   # copia previa
+npm run cloud:migrate                     # aplica migraciones nuevas, si las hay
+npm run cloud:deploy                      # compila y publica
+```
+
+**Revisar errores:** en el panel de Cloudflare, Workers → `antojitos-miriam` → **Logs** (Workers Logs está activado en `wrangler.jsonc`). Ahí aparecen los errores de la API y el resultado del respaldo nocturno. Un fallo del respaldo también queda en Admin → Historial.
+
+**Ver los respaldos guardados:** `npx wrangler kv key list --namespace-id cd3ec967f0c54edd8e455f0b0c958bf4 --remote`.
+
+**Desarrollo local:** `npm run dev` levanta la app con la misma API sobre SQLite local (`database/antojitos.sqlite`, Node.js 22 o posterior) y guarda los respaldos en `database/backups/`. `npm start` sirve la versión compilada con Node; requiere `ANTOJITOS_ACCESS_PASSWORD` (16 caracteres o más). El SQLite local y D1 no se sincronizan entre sí.

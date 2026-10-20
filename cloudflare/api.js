@@ -4,6 +4,7 @@ import { handleAuth, currentUser } from './auth.js';
 import { handleOrders, handleFiles } from './ordersApi.js';
 import { handleData } from './dataApi.js';
 import { handleBackups } from './backup.js';
+import { handleAudit } from './audit.js';
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -22,5 +23,6 @@ export async function handleApi(request, db, url, backups) {
   if (under('/api/data')) return handleData(request, db, url, user);
   if (path.startsWith('/api/files/')) return handleFiles(request, db, url, user);
   if (under('/api/backups')) return handleBackups(request, db, url, user, backups);
+  if (path === '/api/audit') return handleAudit(request, db, url, user);
   return json({ error: 'No encontrado' }, 404);
 }

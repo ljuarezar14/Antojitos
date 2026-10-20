@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server.js",
-    "test": "node --test database/*.test.js cloudflare/*.test.js src/domain/*.test.js",
+    "test": "node --test database/*.test.js cloudflare/*.test.js src/*.test.js src/domain/*.test.js",
     "cloud:migrate": "wrangler d1 migrations apply antojitos-miriam --remote",
     "cloud:deploy": "npm run build && wrangler deploy"
   },

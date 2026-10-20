@@ -1,5 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
+import { orderNumberText } from '../domain/orders';
 
 export const OpenAccountsView = ({ onOpenPayment }) => {
   const { orders, setAccountOrderId, setActiveTab, updateOrderStatus } = useApp();
@@ -17,7 +18,7 @@ export const OpenAccountsView = ({ onOpenPayment }) => {
     </div> : accounts.map(order => <div key={order.id} className="rounded-2xl border border-amber-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="font-black text-slate-900 dark:text-white">{order.customerName} · Cuenta #{order.orderNumber}</h3>
+          <h3 className="font-black text-slate-900 dark:text-white">{order.customerName} · Cuenta {orderNumberText(order)}</h3>
           <p className="text-xs text-slate-500 dark:text-stone-400">Abierta el {order.date}{order.customerPhone ? ` · ${order.customerPhone}` : ''} · {order.status === 'listo' ? 'Listo' : order.status === 'recibido' ? 'Recibido' : 'En preparación'}</p>
         </div>
         <span className="font-black text-lg text-amber-700 dark:text-amber-400">S/ {Number(order.total).toFixed(2)}</span>

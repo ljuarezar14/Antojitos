@@ -1,6 +1,8 @@
 // Orders and uploaded files live in their own rows, so two devices never overwrite
 // each other's work. `db` is a D1 database (or the local adapter with the same API).
 
+import { describeDeletedOrder, describeNewOrder, describeOrderChange, logChange } from './audit.js';
+
 const STATUSES = ['recibido', 'preparando', 'listo', 'entregado', 'cancelado'];
 const MAX_ORDER_BYTES = 100_000;
 const MAX_FILE_BYTES = 1_500_000;
@@ -36,47 +38,62 @@ const storedData = order => {
 
 const NEXT_SEQ = '(SELECT COALESCE(MAX(seq), 0) + 1 FROM order_records)';
 
-async function createOrder(db, order) {
+async function createOrder(db, order, user) {
   const now = new Date().toISOString();
   // A single statement is atomic, so the day's next number can never be handed out twice.
-  await db.prepare(`INSERT INTO order_records (id, date, order_number, data, created_at, updated_at, seq, deleted)
+  const { meta } = await db.prepare(`INSERT INTO order_records (id, date, order_number, data, created_at, updated_at, seq, deleted)
     VALUES (?, ?, (SELECT COALESCE(MAX(order_number), 0) + 1 FROM order_records WHERE date = ?), ?, ?, ?, ${NEXT_SEQ}, 0)
     ON CONFLICT(id) DO NOTHING`)
     .bind(order.id, order.date, order.date, storedData(order), order.createdAt || now, now).run();
   // A retried create returns the row that already exists instead of making a second one.
   const row = await db.prepare('SELECT * FROM order_records WHERE id = ?').bind(order.id).first();
   if (row.deleted) return json({ error: 'El pedido fue eliminado en otro dispositivo', deleted: true }, 410);
+  if (meta?.changes) await logChange(db, user, 'orders', order.id, 'crear', describeNewOrder(toOrder(row)));
   return json({ order: toOrder(row) });
 }
 
-async function updateOrder(db, id, order, baseSeq) {
-  const row = await db.prepare(`UPDATE order_records SET data = ?, updated_at = ?, seq = ${NEXT_SEQ}
+async function updateOrder(db, id, order, baseSeq, user) {
+  const before = await db.prepare('SELECT * FROM order_records WHERE id = ? AND seq = ? AND deleted = 0').bind(id, baseSeq).first();
+  const row = before && await db.prepare(`UPDATE order_records SET data = ?, updated_at = ?, seq = ${NEXT_SEQ}
     WHERE id = ? AND seq = ? AND deleted = 0 RETURNING *`)
     .bind(storedData(order), new Date().toISOString(), id, baseSeq).first();
-  if (row) return json({ order: toOrder(row) });
+  if (row) {
+    await logChange(db, user, 'orders', id, 'editar', describeOrderChange(toOrder(before), toOrder(row)));
+    return json({ order: toOrder(row) });
+  }
   const current = await db.prepare('SELECT * FROM order_records WHERE id = ?').bind(id).first();
   if (!current || current.deleted) return json({ error: 'El pedido fue eliminado en otro dispositivo', deleted: true }, 410);
   return json({ error: 'El pedido cambió en otro dispositivo', order: toOrder(current) }, 409);
 }
 
-async function importOrders(db, orders) {
+// A restore arrives in several requests so a large history fits D1's limits: the first
+// (`reset`) clears the current orders, the rest only add. Each request is one statement.
+async function importOrders(db, orders, reset, user) {
   if (!Array.isArray(orders) || !orders.every(order => validOrder(order) && Number.isInteger(order.orderNumber) && order.orderNumber > 0)) {
     return json({ error: 'Pedidos inválidos en el respaldo' }, 400);
   }
   const now = new Date().toISOString();
-  const statements = [
+  const statements = [];
+  if (reset) {
     // Shifting every seq past the current maximum keeps them unique and newer than any cursor.
-    db.prepare(`UPDATE order_records SET deleted = 1, data = '{}', updated_at = ?,
-      seq = seq + (SELECT MAX(seq) FROM order_records) WHERE deleted = 0`).bind(now)
-  ];
-  for (const order of orders) {
+    statements.push(db.prepare(`UPDATE order_records SET deleted = 1, data = '{}', updated_at = ?,
+      seq = seq + (SELECT MAX(seq) FROM order_records) WHERE deleted = 0`).bind(now));
+  }
+  if (orders.length) {
+    const rows = orders.map(order => ({
+      id: order.id, date: order.date, number: order.orderNumber, data: storedData(order), createdAt: order.createdAt || now
+    }));
     statements.push(db.prepare(`INSERT INTO order_records (id, date, order_number, data, created_at, updated_at, seq, deleted)
-      VALUES (?, ?, ?, ?, ?, ?, ${NEXT_SEQ}, 0)
+      SELECT json_extract(value, '$.id'), json_extract(value, '$.date'), json_extract(value, '$.number'),
+        json_extract(value, '$.data'), json_extract(value, '$.createdAt'), ?,
+        (SELECT COALESCE(MAX(seq), 0) FROM order_records) + key + 1, 0
+      FROM json_each(?) WHERE true
       ON CONFLICT(id) DO UPDATE SET date = excluded.date, order_number = excluded.order_number, data = excluded.data,
         updated_at = excluded.updated_at, seq = excluded.seq, deleted = 0`)
-      .bind(order.id, order.date, order.orderNumber, storedData(order), order.createdAt || now, now));
+      .bind(now, JSON.stringify(rows)));
   }
-  await db.batch(statements);
+  if (statements.length) await db.batch(statements);
+  if (reset) await logChange(db, user, 'orders', null, 'restaurar', 'Pedidos restaurados desde un respaldo');
   return json({ ok: true });
 }
 
@@ -157,7 +174,7 @@ export async function handleOrders(request, db, url, user) {
     const { value, error } = await readBody(request, MAX_ORDER_BYTES);
     if (error) return error;
     if (!validOrder(value)) return json({ error: 'Pedido inválido' }, 400);
-    return createOrder(db, value);
+    return createOrder(db, value, user);
   }
   if (url.pathname === '/api/orders/customer-stats') {
     if (request.method !== 'GET') return json({ error: 'Método no permitido' }, 405);
@@ -168,12 +185,17 @@ export async function handleOrders(request, db, url, user) {
     if (user.role !== 'admin') return json({ error: FORBIDDEN }, 403);
     const { value, error } = await readBody(request, 1_800_000);
     if (error) return error;
-    return importOrders(db, value?.orders);
+    return importOrders(db, value?.orders, value?.reset === true, user);
   }
   if (!/^[\w-]{1,80}$/.test(id)) return json({ error: 'Pedido no encontrado' }, 404);
   if (request.method === 'DELETE') {
+    // Helpers cancel orders (which stay visible); only the admin can make one disappear.
+    if (user.role !== 'admin') return json({ error: 'Solo la administradora puede eliminar pedidos. Puedes cancelarlo.' }, 403);
+    const before = await db.prepare('SELECT * FROM order_records WHERE id = ? AND deleted = 0').bind(id).first();
+    if (!before) return json({ ok: true });
     await db.prepare(`UPDATE order_records SET deleted = 1, data = '{}', updated_at = ?, seq = ${NEXT_SEQ} WHERE id = ? AND deleted = 0`)
       .bind(new Date().toISOString(), id).run();
+    await logChange(db, user, 'orders', id, 'eliminar', describeDeletedOrder(toOrder(before)));
     return json({ ok: true });
   }
   if (request.method !== 'PUT') return json({ error: 'Método no permitido' }, 405);
@@ -182,7 +204,7 @@ export async function handleOrders(request, db, url, user) {
   if (!validOrder(value?.order) || value.order.id !== id || !Number.isSafeInteger(value.baseSeq)) {
     return json({ error: 'Pedido inválido' }, 400);
   }
-  return updateOrder(db, id, value.order, value.baseSeq);
+  return updateOrder(db, id, value.order, value.baseSeq, user);
 }
 
 export async function handleFiles(request, db, url, user) {
@@ -201,6 +223,7 @@ export async function handleFiles(request, db, url, user) {
   if (user.role !== 'admin') return json({ error: FORBIDDEN }, 403);
   if (request.method === 'DELETE') {
     await db.prepare('DELETE FROM app_files WHERE name = ?').bind(name).run();
+    await logChange(db, user, 'files', name, 'eliminar', name === 'logo' ? 'Logo' : 'QR de Yape');
     return json({ ok: true });
   }
   if (request.method !== 'PUT') return json({ error: 'Método no permitido' }, 405);
@@ -210,5 +233,6 @@ export async function handleFiles(request, db, url, user) {
   await db.prepare(`INSERT INTO app_files (name, data, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(name) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`)
     .bind(name, body, new Date().toISOString()).run();
+  await logChange(db, user, 'files', name, 'editar', name === 'logo' ? 'Logo' : 'QR de Yape');
   return json({ ok: true });
 }
