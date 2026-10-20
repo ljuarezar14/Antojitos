@@ -119,12 +119,18 @@ async function recentOrders(db, from) {
   return json({ cursor, orders: results.map(toOrder), deleted: [] });
 }
 
-// Orders that matter for one day's screens and report. Payments are stored in UTC, so the
-// day before and after are included and the browser keeps what falls on its local date.
-async function ordersAround(db, date) {
-  if (!DATE.test(date)) return json({ error: 'Fecha inválida' }, 400);
-  const first = shiftDate(date, -1);
-  const last = shiftDate(date, 1);
+const MAX_RANGE_DAYS = 100;
+
+// Orders that matter for the screens and reports of the days from `from` to `to`: made,
+// paid or paid off then. Payments are stored in UTC, so a day more on each side is
+// included and the browser keeps what falls on its local dates.
+async function ordersAround(db, from, to = from) {
+  if (!DATE.test(from) || !DATE.test(to) || to < from) return json({ error: 'Fecha inválida' }, 400);
+  if ((new Date(`${to}T00:00:00Z`) - new Date(`${from}T00:00:00Z`)) / 86_400_000 >= MAX_RANGE_DAYS) {
+    return json({ error: `Elige como máximo ${MAX_RANGE_DAYS} días` }, 400);
+  }
+  const first = shiftDate(from, -1);
+  const last = shiftDate(to, 1);
   const { results } = await db.prepare(`SELECT * FROM order_records WHERE deleted = 0 AND (
       date BETWEEN ? AND ?
       OR substr(json_extract(data, '$.payment.paidAt'), 1, 10) BETWEEN ? AND ?
@@ -158,6 +164,8 @@ export async function handleOrders(request, db, url, user) {
     if (request.method === 'GET') {
       const around = url.searchParams.get('around');
       if (around) return ordersAround(db, around);
+      const rangeFrom = url.searchParams.get('rangeFrom');
+      if (rangeFrom) return ordersAround(db, rangeFrom, url.searchParams.get('rangeTo') || '');
       // `since` lets each device download only what changed after its last poll.
       const since = Number(url.searchParams.get('since') || 0);
       if (!Number.isSafeInteger(since) || since < 0) return json({ error: 'Cursor inválido' }, 400);

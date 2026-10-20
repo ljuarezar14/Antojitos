@@ -572,17 +572,21 @@ export const AppProvider = ({ children }) => {
     return true;
   };
 
-  const recordDebtPayment = (orderId, amount, method) => {
-    const order = orders.find(item => item.id === orderId);
-    const cents = Math.round(Number(amount) * 100);
-    const balanceCents = Math.round(debtBalance(order || {}) * 100);
-    if (!order?.debt || !Number.isSafeInteger(cents) || cents <= 0 || cents > balanceCents ||
-        !['efectivo', 'yape', 'plin', 'tarjeta', 'otro'].includes(method)) return false;
+  // allocations: [{ orderId, amount }], e.g. one payment spread over a customer's debts.
+  const recordDebtPayments = (allocations, method) => {
+    if (!['efectivo', 'yape', 'plin', 'tarjeta', 'otro'].includes(method) || !allocations?.length) return false;
+    const valid = allocations.every(({ orderId, amount }) => {
+      const order = orders.find(item => item.id === orderId);
+      const cents = Math.round(Number(amount) * 100);
+      return order?.debt && Number.isSafeInteger(cents) && cents > 0 && cents <= Math.round(debtBalance(order) * 100);
+    });
+    if (!valid) return false;
     const now = new Date().toISOString();
+    const amounts = new Map(allocations.map(({ orderId, amount }) => [orderId, Math.round(Number(amount) * 100) / 100]));
     setOrders(previous => previous.map(item => {
-      if (item.id !== orderId) return item;
+      if (!amounts.has(item.id)) return item;
       const debtPayments = [...(item.debtPayments || []), {
-        id: `abono-${crypto.randomUUID()}`, amount: cents / 100, method, paidAt: now, by: by()
+        id: `abono-${crypto.randomUUID()}`, amount: amounts.get(item.id), method, paidAt: now, by: by()
       }];
       return {
         ...item, debtPayments, updatedAt: now,
@@ -593,6 +597,7 @@ export const AppProvider = ({ children }) => {
     }));
     return true;
   };
+  const recordDebtPayment = (orderId, amount, method) => recordDebtPayments([{ orderId, amount }], method);
 
   const cancelOrder = (orderId) => {
     setOrders(prev => prev.map(order => {
@@ -856,6 +861,7 @@ export const AppProvider = ({ children }) => {
         payOrder,
         markOrderAsDebt,
         recordDebtPayment,
+        recordDebtPayments,
         dailyPayments,
         cancelOrder,
         deleteOrder,

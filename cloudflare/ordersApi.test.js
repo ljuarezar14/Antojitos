@@ -132,3 +132,12 @@ test('un respaldo grande se restaura en varias partes', async () => {
   assert.equal(new Set(body.orders.map(o => o._seq)).size, 600);
   assert.equal(body.orders.find(o => o.id === 'q299').orderNumber, 600);
 });
+
+test('los reportes piden un rango de días, con un límite', async () => {
+  await call(handleOrders, 'POST', '/api/orders', order('rango1', { date: '2026-03-10' }));
+  await call(handleOrders, 'POST', '/api/orders', order('rango2', { date: '2026-04-20' }));
+  const { body } = await call(handleOrders, 'GET', '/api/orders?rangeFrom=2026-03-01&rangeTo=2026-03-31');
+  assert.deepEqual(body.orders.map(o => o.id), ['rango1']);
+  assert.equal((await call(handleOrders, 'GET', '/api/orders?rangeFrom=2026-01-01&rangeTo=2026-12-31')).status, 400);
+  assert.equal((await call(handleOrders, 'GET', '/api/orders?rangeFrom=2026-03-31&rangeTo=2026-03-01')).status, 400);
+});

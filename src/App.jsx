@@ -5,6 +5,7 @@ import { LoginView } from './components/LoginView';
 import { TakeOrderView } from './components/TakeOrderView';
 import { OrdersListView } from './components/OrdersListView';
 import { DailyCashRegisterView } from './components/DailyCashRegisterView';
+import { CashAndReportsView } from './components/PeriodReportView';
 import { CustomersView } from './components/CustomersView';
 import { MenuManagementView } from './components/MenuManagementView';
 import { PaymentModal } from './components/PaymentModal';
@@ -84,7 +85,9 @@ const MainContent = () => {
         {activeTab === 'cuentas' && <OpenAccountsView onOpenPayment={(order) => setPaymentOrder(order)} />}
 
         {activeTab === 'caja' && (
-          <DailyCashRegisterView />
+          <CashAndReportsView>
+            <DailyCashRegisterView />
+          </CashAndReportsView>
         )}
         {activeTab === 'deudas' && <DebtsView />}
 
