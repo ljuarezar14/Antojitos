@@ -15,8 +15,8 @@ import { OpenAccountsView } from './components/OpenAccountsView';
 import { Sparkles, HelpCircle, X } from 'lucide-react';
 
 const MainContent = () => {
-  const { currentUser, activeTab, theme, dbReady, dbError: stateError, orderSyncError, orders } = useApp();
-  const dbError = [stateError, orderSyncError].filter(Boolean).join(' · ');
+  const { currentUser, activeTab, theme, dbReady, dbError: stateError, syncError, orders } = useApp();
+  const dbError = [stateError, syncError].filter(Boolean).join(' · ');
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [receiptOrder, setReceiptOrder] = useState(null);
   // Modals follow the live order, so a number confirmed by the server shows up right away.

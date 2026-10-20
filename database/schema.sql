@@ -125,3 +125,14 @@ CREATE TABLE IF NOT EXISTS app_files (
   data TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS records (
+  collection TEXT NOT NULL,
+  id TEXT NOT NULL,
+  data TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (collection, id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_records_seq ON records(seq);

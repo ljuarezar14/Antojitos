@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { useSyncedCollection, syncRequest } from '../sync/useSyncedCollection';
 import { DEFAULT_MENU, DEFAULT_CREMAS, DEFAULT_CATEGORIES } from '../data/defaultMenu';
 import { debtBalance, paymentEvents } from '../domain/finance';
 
@@ -88,19 +89,7 @@ const getLocalDateString = (d = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
-const ORDER_SYNC_KEY = 'antojitos_miriam_order_sync';
-
 const sortOrders = list => [...list].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-
-// Resolves with 409/410 bodies too, since the sync handles those; other failures throw.
-const orderRequest = async (url, options = {}) => {
-  const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json' } });
-  const body = await response.json().catch(() => null);
-  if (!response.ok && response.status !== 409 && response.status !== 410) {
-    throw new Error(body?.error || `Error ${response.status}`);
-  }
-  return { status: response.status, body };
-};
 
 const withOrderStatus = (order, status, at = new Date().toISOString()) => {
   if (order.status === status) return order;
@@ -123,86 +112,72 @@ export const AppProvider = ({ children }) => {
     }
   });
 
-  // Users list (can change PINs)
-  const [users, setUsers] = useState(() => {
-    try {
-      const saved = localStorage.getItem('antojitos_miriam_users_list');
-      return saved ? JSON.parse(saved) : DEFAULT_USERS;
-    } catch {
-      return DEFAULT_USERS;
-    }
+  // Every collection is saved record by record (see useSyncedCollection).
+  const ordersStore = useSyncedCollection({
+    storageKey: 'antojitos_miriam_orders', syncKey: 'antojitos_miriam_order_sync', path: '/api/orders', bodyKey: 'order',
+    fallback: [], sort: sortOrders, describe: order => `El pedido #${order.orderNumber}`
   });
-
-  // Customers Registry State
-  const [customers, setCustomers] = useState(() => {
-    try {
-      const saved = localStorage.getItem('antojitos_miriam_customers');
-      return saved ? JSON.parse(saved) : DEFAULT_CUSTOMERS;
-    } catch {
-      return DEFAULT_CUSTOMERS;
-    }
+  const usersStore = useSyncedCollection({
+    storageKey: 'antojitos_miriam_users_list', path: '/api/data/users', fallback: DEFAULT_USERS, describe: user => `El usuario ${user.name}`
   });
-
-  // Menu State
-  const [menu, setMenu] = useState(() => {
-    try {
-      const saved = localStorage.getItem('antojitos_miriam_menu');
-      return saved ? JSON.parse(saved) : DEFAULT_MENU;
-    } catch {
-      return DEFAULT_MENU;
-    }
+  const customersStore = useSyncedCollection({
+    storageKey: 'antojitos_miriam_customers', path: '/api/data/customers', fallback: DEFAULT_CUSTOMERS, describe: customer => `El casero ${customer.name}`
   });
-
-  // Cremas / Salsas State (editable)
-  const [cremas, setCremas] = useState(() => {
-    try {
-      const saved = localStorage.getItem('antojitos_miriam_cremas');
-      return saved ? JSON.parse(saved) : DEFAULT_CREMAS;
-    } catch {
-      return DEFAULT_CREMAS;
-    }
+  const menuStore = useSyncedCollection({
+    storageKey: 'antojitos_miriam_menu', path: '/api/data/menu', fallback: DEFAULT_MENU, describe: product => `El producto ${product.name}`
   });
-
-  // Global business settings
-  const [settings, setSettings] = useState(() => {
-    try {
-      const saved = localStorage.getItem('antojitos_miriam_settings');
-      return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
-    } catch {
-      return DEFAULT_SETTINGS;
-    }
+  const cremasStore = useSyncedCollection({
+    storageKey: 'antojitos_miriam_cremas', path: '/api/data/cremas', fallback: DEFAULT_CREMAS, describe: crema => `La crema ${crema.name}`
   });
-
-  // Menu categories (editable)
-  const [categories, setCategories] = useState(() => {
-    try {
-      const saved = localStorage.getItem('antojitos_miriam_categories');
-      return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
-    } catch {
-      return DEFAULT_CATEGORIES;
-    }
+  const categoriesStore = useSyncedCollection({
+    storageKey: 'antojitos_miriam_categories', path: '/api/data/categories', fallback: DEFAULT_CATEGORIES, describe: category => `La categoría ${category.name}`
   });
-
-  // Orders State
-  const [orders, setOrders] = useState(() => {
-    try {
-      const saved = localStorage.getItem('antojitos_miriam_orders');
-      if (saved) return JSON.parse(saved);
-      return [];
-    } catch {
-      return [];
-    }
+  const expensesStore = useSyncedCollection({
+    storageKey: 'antojitos_miriam_expenses', path: '/api/data/expenses', fallback: [], describe: expense => `El gasto "${expense.description}"`
   });
+  // Business settings and the WhatsApp greeting are two records of the config collection.
+  const configStore = useSyncedCollection({
+    storageKey: 'antojitos_miriam_config', path: '/api/data/config',
+    fallback: [{ id: 'settings', value: DEFAULT_SETTINGS }, { id: 'greeting', value: DEFAULT_GREETING_MESSAGE }],
+    describe: item => item.id === 'settings' ? 'La configuración del negocio' : 'El mensaje de saludo'
+  });
+  const dataStores = {
+    users: usersStore, customers: customersStore, categories: categoriesStore, cremas: cremasStore,
+    menu: menuStore, expenses: expensesStore, config: configStore
+  };
+  const allStores = [ordersStore, ...Object.values(dataStores)];
 
-  // Daily Expenses
-  const [expenses, setExpenses] = useState(() => {
-    try {
-      const saved = localStorage.getItem('antojitos_miriam_expenses');
-      if (saved) return JSON.parse(saved);
-      return [];
-    } catch {
-      return [];
-    }
+  const { list: users, setList: setUsers } = usersStore;
+  const { list: storedCustomers, setList: setCustomers } = customersStore;
+  const { list: menu, setList: setMenu } = menuStore;
+  const { list: cremas, setList: setCremas } = cremasStore;
+  const { list: categories, setList: setCategories } = categoriesStore;
+  const { list: orders, setList: setOrders } = ordersStore;
+  const { list: expenses, setList: setExpenses } = expensesStore;
+  const { list: config, setList: setConfig } = configStore;
+
+  const setConfigValue = (id, update) => setConfig(previous => {
+    const current = previous.find(item => item.id === id);
+    const value = typeof update === 'function' ? update(current?.value) : update;
+    return current ? previous.map(item => item.id === id ? { ...item, value } : item) : [...previous, { id, value }];
+  });
+  const settings = { ...DEFAULT_SETTINGS, ...config.find(item => item.id === 'settings')?.value };
+  const setSettings = update => setConfigValue('settings', previous =>
+    typeof update === 'function' ? update({ ...DEFAULT_SETTINGS, ...previous }) : update);
+  const greetingTemplate = config.find(item => item.id === 'greeting')?.value ?? DEFAULT_GREETING_MESSAGE;
+  const setGreetingTemplate = text => setConfigValue('greeting', text);
+
+  // Visit counts and spending come from the orders themselves, so two devices charging
+  // at the same time never overwrite each other's totals.
+  const customers = storedCustomers.map(customer => {
+    const theirs = orders.filter(order => order.status !== 'cancelado' && (order.payment || order.debt) &&
+      (order.customerId ? order.customerId === customer.id : order.customerName?.toLowerCase() === customer.name.toLowerCase()));
+    return {
+      ...customer,
+      totalOrders: theirs.length,
+      totalSpent: Math.round(theirs.reduce((sum, order) => sum + (order.total || 0), 0) * 100) / 100,
+      lastVisit: theirs.reduce((last, order) => (order.date > last ? order.date : last), customer.lastVisit || '')
+    };
   });
 
   // Active filter date
@@ -242,249 +217,53 @@ export const AppProvider = ({ children }) => {
   // Sound enabled
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  // Editable WhatsApp greeting message for customers
-  const [greetingTemplate, setGreetingTemplate] = useState(() => {
-    try {
-      const saved = localStorage.getItem('antojitos_miriam_greeting');
-      return saved !== null ? saved : DEFAULT_GREETING_MESSAGE;
-    } catch {
-      return DEFAULT_GREETING_MESSAGE;
-    }
-  });
-
   const [dbReady, setDbReady] = useState(false);
   const [dbError, setDbError] = useState('');
-  const writeQueue = useRef(Promise.resolve());
-  const dbRevision = useRef(0);
-
-  // Order sync: each order is saved on its own, so two devices never overwrite each other.
-  // `serverOrders` holds the last version the server confirmed for each id; any local order
-  // object that differs from it is pending. Pending ids survive reloads and lost signal.
-  const [orderSyncError, setOrderSyncError] = useState('');
-  const [pendingOrders, setPendingOrders] = useState(0);
-  const serverOrders = useRef(new Map());
-  const orderSync = useRef(null);
-  const ordersRef = useRef(orders);
-  ordersRef.current = orders;
-  const flushing = useRef(false);
-  const flushAgain = useRef(false);
-  const retryTimer = useRef(null);
-
-  const saveOrderSync = () => {
-    const sync = orderSync.current;
-    setPendingOrders(sync.dirty.size + sync.removed.size);
-    try {
-      localStorage.setItem(ORDER_SYNC_KEY, JSON.stringify({ dirty: [...sync.dirty], removed: [...sync.removed] }));
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // Puts server versions into the list, leaving orders with unsent local changes alone.
-  const applyServerOrders = (incoming, deletedIds = []) => {
-    const sync = orderSync.current;
-    const replacements = new Map();
-    const previousVersions = new Map();
-    for (const order of incoming) {
-      if (sync.dirty.has(order.id) || sync.removed.has(order.id)) continue;
-      previousVersions.set(order.id, serverOrders.current.get(order.id));
-      serverOrders.current.set(order.id, order);
-      replacements.set(order.id, order);
-    }
-    const gone = new Set(deletedIds.filter(id => !sync.dirty.has(id)));
-    gone.forEach(id => serverOrders.current.delete(id));
-    if (!replacements.size && !gone.size) return;
-    setOrders(previous => {
-      const added = new Map(replacements);
-      const next = previous.filter(order => !gone.has(order.id)).map(order => {
-        if (!added.has(order.id)) return order;
-        const replacement = added.get(order.id);
-        added.delete(order.id);
-        // An edit made in this instant stays; it is sent and resolved as a conflict.
-        return order === previousVersions.get(order.id) ? replacement : order;
-      });
-      return added.size ? sortOrders([...next, ...added.values()]) : next;
-    });
-  };
-
-  const flushOrders = async () => {
-    if (!orderSync.current) return;
-    if (flushing.current) { flushAgain.current = true; return; }
-    flushing.current = true;
-    clearTimeout(retryTimer.current);
-    const sync = orderSync.current;
-    try {
-      do {
-        flushAgain.current = false;
-        for (const id of [...sync.removed]) {
-          await orderRequest(`/api/orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
-          sync.removed.delete(id);
-          serverOrders.current.delete(id);
-          saveOrderSync();
-        }
-        for (const id of [...sync.dirty]) {
-          const sent = ordersRef.current.find(order => order.id === id);
-          if (!sent) { sync.dirty.delete(id); saveOrderSync(); continue; }
-          const { status, body } = sent._seq == null
-            ? await orderRequest('/api/orders', { method: 'POST', body: JSON.stringify(sent) })
-            : await orderRequest(`/api/orders/${encodeURIComponent(id)}`, {
-              method: 'PUT', body: JSON.stringify({ order: sent, baseSeq: sent._seq })
-            });
-          if (status === 410) {
-            sync.dirty.delete(id);
-            serverOrders.current.delete(id);
-            setOrders(previous => previous.filter(order => order.id !== id));
-            setOrderSyncError(`El pedido #${sent.orderNumber} fue eliminado en otro dispositivo.`);
-          } else if (status === 409) {
-            sync.dirty.delete(id);
-            serverOrders.current.set(id, body.order);
-            setOrders(previous => previous.map(order => order.id === id ? body.order : order));
-            setOrderSyncError(`El pedido #${body.order.orderNumber} se modificó en otro dispositivo. Se cargó la última versión: revísalo y repite tu cambio.`);
-          } else {
-            const confirmed = body.order;
-            serverOrders.current.set(id, confirmed);
-            const current = ordersRef.current.find(order => order.id === id);
-            if (!current) sync.removed.add(id);
-            if (current === sent) sync.dirty.delete(id);
-            // Keep edits made while the request was in flight; they go out on the next pass.
-            setOrders(previous => previous.map(order => order.id !== id ? order
-              : order === sent ? confirmed
-              : { ...order, orderNumber: confirmed.orderNumber, _seq: confirmed._seq }));
-            if (current !== sent) flushAgain.current = true;
-          }
-          saveOrderSync();
-        }
-      } while (flushAgain.current);
-      setOrderSyncError(previous => previous.startsWith('Sin conexión') ? '' : previous);
-    } catch (error) {
-      setOrderSyncError(`Sin conexión: hay pedidos guardados solo en este dispositivo. Se enviarán automáticamente (${error.message}).`);
-      retryTimer.current = setTimeout(() => flushOrders(), 5000);
-    } finally {
-      flushing.current = false;
-    }
-  };
-
-  const pollOrders = async () => {
-    if (!orderSync.current || document.visibilityState === 'hidden') return;
-    try {
-      const { body } = await orderRequest(`/api/orders?since=${orderSync.current.cursor}`);
-      orderSync.current.cursor = body.cursor;
-      applyServerOrders(body.orders, body.deleted);
-    } catch {
-      // The next poll retries; pending sends report connection problems.
-    }
-  };
+  const cursors = useRef({ orders: 0, data: 0 });
+  const syncError = [...new Set(allStores.map(store => store.error).filter(Boolean))].join(' · ');
+  const pendingChanges = allStores.reduce((sum, store) => sum + store.pending, 0);
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      fetch('/api/state').then(async response => {
-        if (!response.ok) {
-          const details = await response.json().catch(() => null);
-          throw new Error(details?.error || 'No se pudo abrir la base de datos');
-        }
-        return response.json();
-      }),
-      orderRequest('/api/orders?since=0').then(({ body }) => body)
-    ])
-      .then(([saved, remote]) => {
+    Promise.all([syncRequest('/api/orders?since=0'), syncRequest('/api/data?since=0')])
+      .then(([{ body: remoteOrders }, { body: remoteData }]) => {
         if (!active) return;
-        let stored = null;
-        try { stored = JSON.parse(localStorage.getItem(ORDER_SYNC_KEY)); } catch { stored = null; }
-        const sync = {
-          dirty: new Set(stored?.dirty || []),
-          removed: new Set(stored?.removed || []),
-          cursor: remote.cursor
-        };
-        const remoteById = new Map(remote.orders.map(order => [order.id, order]));
-        let localOrders = ordersRef.current;
-        // First run after the update: changes that never reached the server under the old
-        // whole-state saving are still in this browser, so send them now.
-        if (!stored) {
-          const lastChange = order => String(order.updatedAt || order.createdAt || '');
-          localOrders = localOrders.map(order => {
-            const server = remoteById.get(order.id);
-            if (!server) {
-              sync.dirty.add(order.id);
-              return order;
-            }
-            if (lastChange(order) <= lastChange(server)) return order;
-            sync.dirty.add(order.id);
-            return { ...order, orderNumber: server.orderNumber, _seq: server._seq };
-          });
-        }
-        const localPending = localOrders.filter(order => sync.dirty.has(order.id));
-        const pendingIds = new Set(localPending.map(order => order.id));
-        serverOrders.current = new Map(remote.orders.map(order => [order.id, order]));
-        orderSync.current = sync;
-        setOrders(sortOrders([
-          ...remote.orders.filter(order => !pendingIds.has(order.id) && !sync.removed.has(order.id)),
-          ...localPending
-        ]));
-        saveOrderSync();
-        if (saved) {
-          dbRevision.current = saved._revision;
-          setUsers(saved.users);
-          setCustomers(saved.customers);
-          setMenu(saved.menu);
-          setCremas(saved.cremas);
-          setSettings({ ...DEFAULT_SETTINGS, ...saved.settings });
-          setCategories(saved.categories);
-          setExpenses(saved.expenses);
-          setGreetingTemplate(saved.greetingTemplate);
-          setCurrentUser(previous => saved.users.find(user => user.id === previous?.id) || null);
-        } else {
-          setCurrentUser(null);
-        }
+        cursors.current = { orders: remoteOrders.cursor, data: remoteData.cursor };
+        ordersStore.init(remoteOrders.orders);
+        // A brand-new database starts from this browser's data, or the default menu.
+        const seed = remoteData.cursor === 0;
+        const merged = Object.fromEntries(Object.entries(dataStores).map(([name, store]) =>
+          [name, store.init(remoteData.records[name], { seed })]));
+        setCurrentUser(previous => merged.users.find(user => user.id === previous?.id) || null);
         setDbReady(true);
       })
       .catch(error => { if (active) setDbError(error.message); });
     return () => { active = false; };
   }, []);
 
-  // One debounced write per state change. Reading the API never writes back in a loop.
+  // Other devices' changes show up within a few seconds.
+  const poll = async () => {
+    if (document.visibilityState === 'hidden') return;
+    try {
+      const [{ body: orderChanges }, { body: dataChanges }] = await Promise.all([
+        syncRequest(`/api/orders?since=${cursors.current.orders}`),
+        syncRequest(`/api/data?since=${cursors.current.data}`)
+      ]);
+      cursors.current = { orders: orderChanges.cursor, data: dataChanges.cursor };
+      ordersStore.applyServer(orderChanges.orders, orderChanges.deleted);
+      for (const [name, store] of Object.entries(dataStores)) store.applyServer(dataChanges.records[name], dataChanges.deleted[name]);
+    } catch {
+      // The next poll retries; pending sends report connection problems.
+    }
+  };
+
   useEffect(() => {
     if (!dbReady) return;
-    const timer = setTimeout(() => {
-      writeQueue.current = writeQueue.current.catch(() => {}).then(() => fetch('/api/state', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ _revision: dbRevision.current, users, customers, menu, cremas, settings, categories, expenses, greetingTemplate })
-      }).then(response => {
-        if (!response.ok) return response.json().then(data => { throw new Error(data.error || 'Error al guardar'); });
-        return response.json();
-      }).then(result => {
-        dbRevision.current = result.revision;
-        setDbError('');
-      }).catch(error => setDbError(`Los cambios solo están en este navegador: ${error.message}`)));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [dbReady, users, customers, menu, cremas, settings, categories, expenses, greetingTemplate]);
-
-  // Every local change to an order marks it pending and sends it.
-  useEffect(() => {
-    const sync = orderSync.current;
-    if (!dbReady || !sync) return;
-    const ids = new Set();
-    for (const order of orders) {
-      ids.add(order.id);
-      if (serverOrders.current.get(order.id) !== order) sync.dirty.add(order.id);
-    }
-    for (const id of serverOrders.current.keys()) {
-      if (!ids.has(id)) sync.removed.add(id);
-    }
-    for (const id of sync.dirty) {
-      if (!ids.has(id)) sync.dirty.delete(id);
-    }
-    saveOrderSync();
-    if (sync.dirty.size || sync.removed.size) flushOrders();
-  }, [dbReady, orders]);
-
-  // Other devices' orders show up within a few seconds.
-  useEffect(() => {
-    if (!dbReady) return;
-    const refresh = () => { flushOrders(); pollOrders(); };
-    const timer = setInterval(pollOrders, 5000);
+    const refresh = () => {
+      allStores.forEach(store => store.flush());
+      poll();
+    };
+    const timer = setInterval(poll, 5000);
     window.addEventListener('online', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => {
@@ -494,7 +273,6 @@ export const AppProvider = ({ children }) => {
     };
   }, [dbReady]);
 
-  // Sync to localStorage
   useEffect(() => {
     try {
       if (currentUser) {
@@ -506,78 +284,6 @@ export const AppProvider = ({ children }) => {
       console.error(e);
     }
   }, [currentUser]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('antojitos_miriam_users_list', JSON.stringify(users));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [users]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('antojitos_miriam_customers', JSON.stringify(customers));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [customers]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('antojitos_miriam_menu', JSON.stringify(menu));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [menu]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('antojitos_miriam_cremas', JSON.stringify(cremas));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [cremas]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('antojitos_miriam_settings', JSON.stringify(settings));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [settings]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('antojitos_miriam_categories', JSON.stringify(categories));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [categories]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('antojitos_miriam_orders', JSON.stringify(orders));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [orders]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('antojitos_miriam_expenses', JSON.stringify(expenses));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [expenses]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('antojitos_miriam_greeting', greetingTemplate);
-    } catch (e) {
-      console.error(e);
-    }
-  }, [greetingTemplate]);
 
   // Login & Logout
   const login = (userId, enteredPin) => {
@@ -708,45 +414,19 @@ export const AppProvider = ({ children }) => {
   };
 
   const payOrder = (orderId, paymentData) => {
-    setOrders(prev => {
-      let paidOrderTarget = null;
-      const updated = prev.map(order => {
-        if (order.id === orderId) {
-          paidOrderTarget = order;
-          const paidAt = new Date().toISOString();
-          return {
-            ...withOrderStatus(order, 'entregado', paidAt),
-            openAccount: false,
-            payment: {
-              ...paymentData,
-              paidAt
-            }
-          };
+    // Customer stats are derived from the orders, so only the order changes here.
+    setOrders(prev => prev.map(order => {
+      if (order.id !== orderId) return order;
+      const paidAt = new Date().toISOString();
+      return {
+        ...withOrderStatus(order, 'entregado', paidAt),
+        openAccount: false,
+        payment: {
+          ...paymentData,
+          paidAt
         }
-        return order;
-      });
-
-      // Update customer stats if linked
-      if (paidOrderTarget && !paidOrderTarget.payment) {
-        const cId = paidOrderTarget.customerId;
-        const cName = paidOrderTarget.customerName;
-        const total = paidOrderTarget.total || 0;
-
-        setCustomers(prevCust => prevCust.map(c => {
-          if ((cId && c.id === cId) || (!cId && c.name.toLowerCase() === cName.toLowerCase())) {
-            return {
-              ...c,
-              totalOrders: (c.totalOrders || 0) + 1,
-              totalSpent: (c.totalSpent || 0) + total,
-              lastVisit: getLocalDateString()
-            };
-          }
-          return c;
-        }));
-      }
-
-      return updated;
-    });
+      };
+    }));
 
     triggerAudio('paid');
   };
@@ -762,12 +442,6 @@ export const AppProvider = ({ children }) => {
       openAccount: false,
       debt: { createdAt: now }, debtPayments: []
     } : item));
-    setCustomers(previous => previous.map(customer => customer.id === order.customerId ? {
-      ...customer,
-      totalOrders: (customer.totalOrders || 0) + 1,
-      totalSpent: (customer.totalSpent || 0) + (order.total || 0),
-      lastVisit: getLocalDateString()
-    } : customer));
     return true;
   };
 
@@ -825,7 +499,8 @@ export const AppProvider = ({ children }) => {
   };
 
   const updateCustomer = (customerId, updatedData) => {
-    setCustomers(prev => prev.map(c => (c.id === customerId ? { ...c, ...updatedData } : c)));
+    const { totalOrders, totalSpent, ...editable } = updatedData;
+    setCustomers(prev => prev.map(c => (c.id === customerId ? { ...c, ...editable } : c)));
   };
 
   const deleteCustomer = (customerId) => {
@@ -1012,8 +687,8 @@ export const AppProvider = ({ children }) => {
         greetingTemplate,
         dbReady,
         dbError,
-        orderSyncError,
-        pendingOrders,
+        syncError,
+        pendingChanges,
         updateGreetingTemplate,
         resetGreetingTemplate,
         activeOrdersCount,

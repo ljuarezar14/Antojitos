@@ -1,5 +1,6 @@
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { handleOrders, handleFiles } from './ordersApi.js';
+import { handleData } from './dataApi.js';
 
 const keySets = new Map();
 function accessKeys(teamDomain) {
@@ -31,14 +32,6 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), {
   headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
 });
 
-const validState = data =>
-  data && Number.isInteger(data._revision) && data._revision >= 0 &&
-  ['users', 'customers', 'categories', 'cremas', 'menu', 'expenses'].every(key => Array.isArray(data[key])) &&
-  data.users.every(user => user && /^\d{4}$/.test(String(user.pin))) &&
-  data.settings && typeof data.settings === 'object' &&
-  !String(data.settings.yapeQr || '').startsWith('data:') &&
-  typeof data.greetingTemplate === 'string';
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -64,26 +57,10 @@ export default {
     try {
       if (url.pathname === '/api/orders' || url.pathname.startsWith('/api/orders/')) return await handleOrders(request, env.DB, url);
       if (url.pathname.startsWith('/api/files/')) return await handleFiles(request, env.DB, url);
-      if (url.pathname !== '/api/state') return json({ error: 'No encontrado' }, 404);
-      if (request.method === 'GET') {
-        const row = await env.DB.prepare('SELECT data, revision FROM app_state WHERE id = 1').first();
-        if (!row || row.data === 'null') return json(null);
-        return json({ ...JSON.parse(row.data), _revision: row.revision });
-      }
-      if (request.method !== 'PUT') return json({ error: 'Método no permitido' }, 405);
-      const body = await request.text();
-      if (new TextEncoder().encode(body).length > 1_800_000) return json({ error: 'Los datos superan el límite de D1. Exporta un respaldo y contacta al administrador.' }, 413);
-      let data;
-      try { data = JSON.parse(body); }
-      catch { return json({ error: 'JSON inválido' }, 400); }
-      if (!validState(data)) return json({ error: 'Datos inválidos' }, 400);
-      const revision = data._revision;
-      delete data._revision;
-      delete data.orders;
-      const result = await env.DB.prepare('UPDATE app_state SET data = ?, revision = revision + 1, updated_at = ? WHERE id = 1 AND revision = ?')
-        .bind(JSON.stringify(data), new Date().toISOString(), revision).run();
-      if (result.meta.changes !== 1) return json({ error: 'Los datos cambiaron en otro dispositivo. Recarga la página antes de guardar.' }, 409);
-      return json({ ok: true, revision: revision + 1 });
+      if (url.pathname === '/api/data' || url.pathname.startsWith('/api/data/')) return await handleData(request, env.DB, url);
+      // Pages from before the per-record storage still call this; they need a reload.
+      if (url.pathname === '/api/state') return json({ error: 'Hay una versión nueva de la aplicación. Recarga la página.' }, 410);
+      return json({ error: 'No encontrado' }, 404);
     } catch (error) {
       console.error(error);
       return json({ error: 'No se pudo acceder a la base de datos' }, 500);

@@ -38,7 +38,7 @@ export const DailyCashRegisterView = () => {
     deleteExpense,
     settings,
     dbError,
-    pendingOrders
+    pendingChanges
   } = useApp();
 
   const [expenseDesc, setExpenseDesc] = useState('');
@@ -165,18 +165,9 @@ export const DailyCashRegisterView = () => {
     }
     setExportingReport(true);
     try {
-      const response = await fetch('/api/state');
-      if (!response.ok) throw new Error('No se pudo leer la base de datos.');
-      const saved = await response.json();
-      if (!saved) throw new Error('Todavía no hay datos guardados.');
-      const savedExpenses = saved.expenses.filter(expense => expense.date === filterDate);
-      if (pendingOrders ||
-          JSON.stringify(savedExpenses) !== JSON.stringify(filteredExpenses) ||
-          JSON.stringify(saved.settings) !== JSON.stringify(settings)) {
-        throw new Error('Hay cambios pendientes de guardar. Espera un momento y vuelve a descargar.');
-      }
+      if (pendingChanges) throw new Error('Hay cambios pendientes de guardar. Espera un momento y vuelve a descargar.');
       const { buildDailyReport } = await import('../reports/dailyReport');
-      const report = buildDailyReport({ ...saved, orders }, filterDate);
+      const report = buildDailyReport({ orders, expenses: filteredExpenses, settings }, filterDate);
       report.save(`cierre-caja-${filterDate}.pdf`);
     } catch (error) {
       setReportError(error.message || 'No se pudo crear el PDF.');

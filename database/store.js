@@ -75,26 +75,26 @@ function migrateLegacyOrders() {
   }
 }
 
-function migrateYapeQr() {
+// Images uploaded into the settings move to app_files and are served from /api/files.
+function migrateImages() {
   const state = db.prepare('SELECT settings FROM app_state WHERE id = 1').get();
   const settings = parse(state?.settings, {});
-  if (!String(settings.yapeQr || '').startsWith('data:image/')) return;
+  const images = [['yapeQr', 'yape-qr'], ['logo', 'logo']].filter(([key]) => String(settings[key] || '').startsWith('data:image/'));
+  if (!images.length) return;
   const now = new Date().toISOString();
-  db.prepare(`INSERT INTO app_files (name, data, updated_at) VALUES ('yape-qr', ?, ?)
-    ON CONFLICT(name) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`).run(settings.yapeQr, now);
-  settings.yapeQr = `/api/files/yape-qr?v=${Date.now()}`;
+  for (const [key, name] of images) {
+    db.prepare(`INSERT INTO app_files (name, data, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`).run(name, settings[key], now);
+    settings[key] = `/api/files/${name}?v=${Date.now()}`;
+  }
   db.prepare('UPDATE app_state SET settings = ?, revision = revision + 1, updated_at = ? WHERE id = 1').run(JSON.stringify(settings), now);
 }
 
-migrateLegacyOrders();
-migrateYapeQr();
-
-export function readState() {
+function legacyState() {
   const state = db.prepare('SELECT * FROM app_state WHERE id = 1').get();
   if (!state) return null;
 
   return {
-    _revision: state.revision,
     users: rows('SELECT * FROM users').map(u => ({ id: u.id, name: u.name, role: u.role, pin: u.pin, avatar: u.avatar })),
     customers: rows('SELECT * FROM customers').map(c => ({
       id: c.id, name: c.name, phone: c.phone, favoriteDish: c.favorite_dish,
@@ -115,63 +115,29 @@ export function readState() {
   };
 }
 
-// A single transaction keeps every snapshot consistent. Orders are saved separately
-// through cloudflare/ordersApi.js, so this never touches them.
-export function writeState(data) {
-  for (const key of ['users', 'customers', 'categories', 'cremas', 'menu', 'expenses']) {
-    if (!Array.isArray(data[key])) throw new Error(`Falta la lista ${key}`);
-  }
-  if (data.users.some(user => !/^\d{4}$/.test(String(user.pin)))) throw new Error('Cada PIN debe tener cuatro dígitos');
-  if (!data.settings || typeof data.settings !== 'object') throw new Error('Faltan los ajustes');
-  if (typeof data.greetingTemplate !== 'string') throw new Error('Falta el mensaje de saludo');
-  if (String(data.settings.yapeQr || '').startsWith('data:')) throw new Error('El QR se guarda aparte');
-
+// The rest of the data used to be rewritten as a whole on every save. It now lives one
+// record per row in `records`, like the Cloudflare D1 database; this copies it a single time.
+function migrateLegacyState() {
+  if (db.prepare('SELECT 1 FROM records LIMIT 1').get()) return;
+  const state = legacyState();
+  if (!state) return;
+  const now = new Date().toISOString();
+  const insert = db.prepare('INSERT INTO records (collection, id, data, seq, updated_at) VALUES (?, ?, ?, ?, ?)');
+  let seq = 0;
   db.exec('BEGIN IMMEDIATE');
   try {
-    const actualRevision = db.prepare('SELECT revision FROM app_state WHERE id = 1').get()?.revision ?? 0;
-    if (!Number.isInteger(data._revision) || data._revision !== actualRevision) {
-      const error = new Error('Los datos cambiaron en otro dispositivo. Recarga la página antes de guardar.');
-      error.status = 409;
-      throw error;
+    for (const collection of ['users', 'customers', 'categories', 'cremas', 'menu', 'expenses']) {
+      for (const item of state[collection]) insert.run(collection, item.id, JSON.stringify(item), ++seq, now);
     }
-    for (const table of ['products', 'cremas', 'categories', 'customers', 'users', 'expenses']) {
-      db.exec(`DELETE FROM ${table}`);
-    }
-
-    const insertUser = db.prepare('INSERT INTO users VALUES (?, ?, ?, ?, ?)');
-    for (const u of data.users) insertUser.run(u.id, u.name, u.role, String(u.pin), u.avatar || '');
-
-    const insertCustomer = db.prepare('INSERT INTO customers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const c of data.customers) insertCustomer.run(
-      c.id, c.name, c.phone || '', c.favoriteDish || '', JSON.stringify(c.favoriteCremas || []),
-      c.notes || '', c.totalOrders || 0, c.totalSpent || 0, c.createdAt || null, c.lastVisit || null
-    );
-
-    const insertCategory = db.prepare('INSERT INTO categories VALUES (?, ?, ?)');
-    for (const c of data.categories) insertCategory.run(c.id, c.name, c.icon || 'Utensils');
-
-    const insertCrema = db.prepare('INSERT INTO cremas VALUES (?, ?, ?)');
-    for (const c of data.cremas) insertCrema.run(c.id, c.name, c.short || c.name);
-
-    const categoryIds = new Set(data.categories.map(c => c.id));
-    const insertProduct = db.prepare('INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const p of data.menu) insertProduct.run(
-      p.id, categoryIds.has(p.category) ? p.category : null, p.name, p.price,
-      p.description || '', Number(Boolean(p.available)), Number(Boolean(p.popular)), p.emoji || ''
-    );
-
-    const insertExpense = db.prepare('INSERT INTO expenses VALUES (?, ?, ?, ?, ?)');
-    for (const e of data.expenses) insertExpense.run(e.id, e.date, e.description, e.amount, e.createdAt);
-
-    db.prepare(`INSERT INTO app_state (id, settings, greeting_template, updated_at, revision)
-      VALUES (1, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET
-      settings = excluded.settings, greeting_template = excluded.greeting_template,
-      updated_at = excluded.updated_at, revision = excluded.revision`).run(
-      JSON.stringify(data.settings), data.greetingTemplate, new Date().toISOString(), actualRevision + 1
-    );
+    insert.run('config', 'settings', JSON.stringify({ id: 'settings', value: state.settings }), ++seq, now);
+    insert.run('config', 'greeting', JSON.stringify({ id: 'greeting', value: state.greetingTemplate }), ++seq, now);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
   }
 }
+
+migrateLegacyOrders();
+migrateImages();
+migrateLegacyState();

@@ -31,13 +31,23 @@ const readImage = (file, cb) => {
 
 const BACKUP_PREFIX = 'antojitos_miriam_';
 
-const uploadQr = async (dataUrl) => {
-  const response = await fetch('/api/files/yape-qr', { method: 'PUT', body: dataUrl });
+// Images are stored apart from the rest of the data so they are not sent with every save.
+// Returns the URL the settings keep; the version makes browsers fetch a replaced image.
+const uploadImage = async (name, dataUrl) => {
+  const response = await fetch(`/api/files/${name}`, { method: 'PUT', body: dataUrl });
   if (!response.ok) {
     const details = await response.json().catch(() => null);
-    throw new Error(details?.error || 'No se pudo subir el QR');
+    throw new Error(details?.error || 'No se pudo subir la imagen');
   }
+  return `/api/files/${name}?v=${Date.now()}`;
 };
+
+const removeImage = async (name) => {
+  const response = await fetch(`/api/files/${name}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('No se pudo quitar la imagen');
+};
+
+const withoutSeq = list => list.map(({ _seq, ...item }) => item);
 
 const PAYMENT_OPTIONS = [
   { key: 'efectivo', label: 'Efectivo', icon: Coins },
@@ -58,7 +68,13 @@ export const SettingsView = () => {
     deleteCategory,
     resetCategoriesToDefault,
     orders,
-    pendingOrders,
+    users,
+    customers,
+    menu,
+    cremas,
+    expenses,
+    greetingTemplate,
+    pendingChanges,
   } = useApp();
 
   // Hooks declared unconditionally to keep hook order stable
@@ -67,6 +83,7 @@ export const SettingsView = () => {
   const [editingCat, setEditingCat] = useState(null);
   const [importMsg, setImportMsg] = useState('');
   const [qrError, setQrError] = useState('');
+  const [logoError, setLogoError] = useState('');
   const logoInputRef = useRef(null);
   const qrInputRef = useRef(null);
   const importInputRef = useRef(null);
@@ -97,39 +114,33 @@ export const SettingsView = () => {
     { id: 'respaldo', label: 'Respaldo', icon: Download },
   ];
 
-  const handleLogoUpload = (e) => {
+  const handleImageUpload = (name, key, setError) => (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    readImage(file, (dataUrl) => updateSettings({ logo: dataUrl }));
-    e.target.value = '';
-  };
-
-  // The QR is stored apart from the rest of the data so it is not sent with every save.
-  const handleQrUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setQrError('');
+    setError('');
     readImage(file, async (dataUrl) => {
       try {
-        await uploadQr(dataUrl);
-        updateSettings({ yapeQr: `/api/files/yape-qr?v=${Date.now()}` });
+        updateSettings({ [key]: await uploadImage(name, dataUrl) });
       } catch (error) {
-        setQrError(error.message);
+        setError(error.message);
       }
     });
     e.target.value = '';
   };
+  const handleLogoUpload = handleImageUpload('logo', 'logo', setLogoError);
+  const handleQrUpload = handleImageUpload('yape-qr', 'yapeQr', setQrError);
 
-  const handleQrRemove = async () => {
-    setQrError('');
+  const handleImageRemove = (name, key, setError) => async () => {
+    setError('');
     try {
-      const response = await fetch('/api/files/yape-qr', { method: 'DELETE' });
-      if (!response.ok) throw new Error('No se pudo quitar el QR');
-      updateSettings({ yapeQr: null });
+      await removeImage(name);
+      updateSettings({ [key]: null });
     } catch (error) {
-      setQrError(error.message);
+      setError(error.message);
     }
   };
+  const handleLogoRemove = handleImageRemove('logo', 'logo', setLogoError);
+  const handleQrRemove = handleImageRemove('yape-qr', 'yapeQr', setQrError);
 
   const togglePayment = (key) => {
     updateSettings({ paymentMethods: { ...paymentMethods, [key]: !paymentMethods[key] } });
@@ -142,34 +153,19 @@ export const SettingsView = () => {
     setNewCatName('');
   };
 
-  const handleExport = async () => {
-    if (pendingOrders) {
-      setImportMsg('Hay pedidos pendientes de enviar. Espera a tener conexión y vuelve a intentarlo.');
-      return;
-    }
-    let saved;
-    try {
-      const response = await fetch('/api/state');
-      if (!response.ok) throw new Error('No se pudo leer la base de datos');
-      saved = await response.json();
-    } catch (error) {
-      setImportMsg(`No se pudo generar el respaldo: ${error.message}`);
+  const handleExport = () => {
+    if (pendingChanges) {
+      setImportMsg('Hay cambios pendientes de enviar. Espera a tener conexión y vuelve a intentarlo.');
       return;
     }
     const data = {};
-    Object.keys(localStorage)
-      .filter((k) => k.startsWith(BACKUP_PREFIX))
-      .forEach((k) => {
-        data[k] = localStorage.getItem(k);
-      });
-    if (saved) {
-      for (const [suffix, value] of Object.entries({
-        users_list: saved.users, customers: saved.customers, menu: saved.menu,
-        cremas: saved.cremas, settings: saved.settings, categories: saved.categories,
-        orders: orders.map(({ _seq, ...order }) => order), expenses: saved.expenses
-      })) data[`${BACKUP_PREFIX}${suffix}`] = JSON.stringify(value);
-      data[`${BACKUP_PREFIX}greeting`] = saved.greetingTemplate;
-    }
+    for (const [suffix, value] of Object.entries({
+      users_list: withoutSeq(users),
+      customers: withoutSeq(customers).map(({ totalOrders, totalSpent, ...customer }) => customer),
+      menu: withoutSeq(menu), cremas: withoutSeq(cremas), settings, categories: withoutSeq(categories),
+      orders: withoutSeq(orders), expenses: withoutSeq(expenses)
+    })) data[`${BACKUP_PREFIX}${suffix}`] = JSON.stringify(value);
+    data[`${BACKUP_PREFIX}greeting`] = greetingTemplate;
     const payload = {
       app: 'antojitos-miriam',
       version: 1,
@@ -201,38 +197,41 @@ export const SettingsView = () => {
         const read = (suffix, fallback) => {
           try { return JSON.parse(data[`${BACKUP_PREFIX}${suffix}`]) ?? fallback; } catch { return fallback; }
         };
-        const restoredOrders = read('orders', []);
-        const restored = {
-          _revision: (await (await fetch('/api/state')).json())?._revision ?? 0,
+        const restoredSettings = read('settings', {});
+        // Older backups carry the images inside the settings.
+        for (const [key, name] of [['yapeQr', 'yape-qr'], ['logo', 'logo']]) {
+          if (String(restoredSettings[key] || '').startsWith('data:')) {
+            restoredSettings[key] = await uploadImage(name, restoredSettings[key]);
+          }
+        }
+        const collections = {
           users: read('users_list', []),
           customers: read('customers', []),
-          menu: read('menu', []),
-          cremas: read('cremas', []),
-          settings: read('settings', {}),
           categories: read('categories', []),
+          cremas: read('cremas', []),
+          menu: read('menu', []),
           expenses: read('expenses', []),
-          greetingTemplate: data[`${BACKUP_PREFIX}greeting`] || ''
+          config: [
+            { id: 'settings', value: restoredSettings },
+            { id: 'greeting', value: data[`${BACKUP_PREFIX}greeting`] || '' }
+          ]
         };
-        // Older backups carry the QR image inside the settings.
-        if (String(restored.settings.yapeQr || '').startsWith('data:')) {
-          await uploadQr(restored.settings.yapeQr);
-          restored.settings.yapeQr = `/api/files/yape-qr?v=${Date.now()}`;
-        }
-        const response = await fetch('/api/state', {
-          method: 'PUT',
+        const response = await fetch('/api/data/import', {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(restored)
+          body: JSON.stringify({ collections })
         });
         if (!response.ok) throw new Error('No se pudo guardar el respaldo en la base de datos');
         const ordersResponse = await fetch('/api/orders/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orders: restoredOrders })
+          body: JSON.stringify({ orders: read('orders', []) })
         });
         if (!ordersResponse.ok) throw new Error('No se pudieron guardar los pedidos del respaldo');
-        keys.forEach((k) => localStorage.setItem(k, data[k]));
-        localStorage.setItem(`${BACKUP_PREFIX}settings`, JSON.stringify(restored.settings));
-        localStorage.setItem(`${BACKUP_PREFIX}order_sync`, JSON.stringify({ dirty: [], removed: [] }));
+        // This browser's copies are older than the restored data; it reloads from the server.
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith(BACKUP_PREFIX) && !['user', 'theme'].includes(k.slice(BACKUP_PREFIX.length)))
+          .forEach((k) => localStorage.removeItem(k));
         window.location.reload();
       } catch (error) {
         setImportMsg(error.message || 'No se pudo leer el archivo. Verifica que sea un respaldo válido.');
@@ -352,12 +351,13 @@ export const SettingsView = () => {
                   {settings.logo && (
                     <button
                       type="button"
-                      onClick={() => updateSettings({ logo: null })}
+                      onClick={handleLogoRemove}
                       className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-stone-800 text-slate-600 dark:text-stone-300 font-bold text-xs flex items-center gap-1.5 hover:bg-red-50 hover:text-red-600"
                     >
                       <Trash2 className="w-3.5 h-3.5" /> Quitar (usar original)
                     </button>
                   )}
+                  {logoError && <p role="alert" className="text-[11px] font-bold text-red-600">{logoError}</p>}
                 </div>
               </div>
             </Field>

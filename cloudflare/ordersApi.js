@@ -4,7 +4,7 @@
 const STATUSES = ['recibido', 'preparando', 'listo', 'entregado', 'cancelado'];
 const MAX_ORDER_BYTES = 100_000;
 const MAX_FILE_BYTES = 1_500_000;
-const FILES = new Set(['yape-qr']);
+const FILES = new Set(['yape-qr', 'logo']);
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), {
   status,

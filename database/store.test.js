@@ -1,37 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// A local database from before per-record saving: data in the normalized tables.
 const directory = mkdtempSync(join(tmpdir(), 'antojitos-db-'));
-process.env.ANTOJITOS_DB_PATH = join(directory, 'test.sqlite');
-const { db, readState, writeState } = await import('./store.js');
+const file = join(directory, 'old.sqlite');
+const oldDb = new DatabaseSync(file);
+oldDb.exec(readFileSync(new URL('./schema.sql', import.meta.url), 'utf8').split('CREATE TABLE IF NOT EXISTS order_records')[0]);
+oldDb.exec(`
+  INSERT INTO users VALUES ('u1', 'Miriam', 'admin', '1234', '👩‍🍳');
+  INSERT INTO customers (id, name, favorite_cremas, total_orders, total_spent) VALUES ('c1', 'Ana', '["Ají"]', 1, 6);
+  INSERT INTO categories VALUES ('comidas', 'Comidas', 'Utensils');
+  INSERT INTO cremas VALUES ('aji', 'Ají', 'Ají');
+  INSERT INTO products (id, category_id, name, price) VALUES ('p1', 'comidas', 'Hamburguesa', 6);
+  INSERT INTO expenses VALUES ('e1', '2026-10-14', 'Hielo', 2, '2026-10-14T11:00:00Z');
+  INSERT INTO app_state VALUES (1, '{"businessName":"Antojitos","logo":"data:image/png;base64,AAAA"}', 'Hola', '2026-10-14T11:00:00Z', 3);
+`);
+oldDb.close();
+process.env.ANTOJITOS_DB_PATH = file;
+const { db } = await import('./store.js');
 
-test('guarda el estado sin tocar los pedidos ni el QR', () => {
-  const state = {
-    _revision: readState()?._revision ?? 0,
-    users: [{ id: 'u1', name: 'Miriam', role: 'admin', pin: '1234', avatar: '👩‍🍳' }],
-    customers: [{ id: 'c1', name: 'Ana', phone: '', favoriteCremas: ['Ají'], totalOrders: 1, totalSpent: 6 }],
-    categories: [{ id: 'comidas', name: 'Comidas', icon: 'Utensils' }],
-    cremas: [{ id: 'aji', name: 'Ají', short: 'Ají' }],
-    menu: [{ id: 'p1', name: 'Hamburguesa', category: 'comidas', price: 6, available: true }],
-    expenses: [{ id: 'e1', date: '2026-10-14', description: 'Hielo', amount: 2, createdAt: '2026-10-14T11:00:00Z' }],
-    settings: { businessName: 'Antojitos', yapeQr: '/api/files/yape-qr?v=1' }, greetingTemplate: 'Hola'
-  };
-  db.prepare(`INSERT INTO order_records (id, date, order_number, data, created_at, updated_at, seq)
-    VALUES ('o1', '2026-10-14', 1, '{}', '2026-10-14T12:00:00Z', '2026-10-14T12:00:00Z', 1)`).run();
-
-  writeState(state);
-  assert.equal(readState().customers[0].name, 'Ana');
-  assert.equal(readState().settings.yapeQr, '/api/files/yape-qr?v=1');
-  assert.equal(readState().orders, undefined);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM order_records').get().n, 1);
-  assert.throws(() => writeState(state), /Los datos cambiaron/);
-  state._revision = readState()._revision;
-  state.settings.yapeQr = 'data:image/png;base64,AAAA';
-  assert.throws(() => writeState(state), /QR/);
-  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+test('copia usuarios, caseros, carta, gastos y ajustes a records', () => {
+  const records = Object.groupBy(db.prepare('SELECT * FROM records').all(), row => row.collection);
+  const data = name => records[name].map(row => JSON.parse(row.data));
+  assert.equal(data('users')[0].pin, '1234');
+  assert.deepEqual(data('customers')[0].favoriteCremas, ['Ají']);
+  assert.equal(data('menu')[0].category, 'comidas');
+  assert.equal(data('expenses')[0].description, 'Hielo');
+  assert.equal(data('categories')[0].name, 'Comidas');
+  assert.equal(data('cremas')[0].short, 'Ají');
+  const settings = data('config').find(item => item.id === 'settings').value;
+  assert.equal(settings.businessName, 'Antojitos');
+  assert.match(settings.logo, /^\/api\/files\/logo\?v=\d+$/);
+  assert.equal(data('config').find(item => item.id === 'greeting').value, 'Hola');
+  assert.equal(db.prepare("SELECT data FROM app_files WHERE name = 'logo'").get().data, 'data:image/png;base64,AAAA');
+  const seqs = db.prepare('SELECT seq FROM records').all().map(row => row.seq);
+  assert.equal(new Set(seqs).size, seqs.length);
 });
 
 test.after(() => {

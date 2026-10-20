@@ -29,41 +29,10 @@ test('la contraseña protege también los archivos estáticos', async () => {
   assert.equal(response.status, 200);
 });
 
-test('D1 guarda, recupera y rechaza una revisión antigua', async () => {
-  const row = { data: 'null', revision: 0 };
-  const env = {
-    ACCESS_PASSWORD: 'una-clave-larga-para-pruebas',
-    DB: {
-      prepare(sql) {
-        if (sql.startsWith('SELECT')) return { first: async () => row };
-        return {
-          bind(data, _updatedAt, revision) {
-            return {
-              run: async () => {
-                if (row.revision !== revision) return { meta: { changes: 0 } };
-                row.data = data;
-                row.revision++;
-                return { meta: { changes: 1 } };
-              }
-            };
-          }
-        };
-      }
-    }
-  };
+test('las páginas antiguas que piden el estado completo reciben aviso de recargar', async () => {
+  const env = { ACCESS_PASSWORD: 'una-clave-larga-para-pruebas', DB: { prepare: () => { throw new Error('Database must not be accessed'); } } };
   const headers = { Authorization: `Basic ${btoa('miriam:una-clave-larga-para-pruebas')}` };
-  const url = 'https://example.com/api/state';
-  const initial = await worker.fetch(new Request(url, { headers }), env, {});
-  assert.equal(await initial.json(), null);
-  const state = {
-    _revision: 0, users: [], customers: [], categories: [], cremas: [],
-    menu: [], orders: [], expenses: [], settings: {}, greetingTemplate: ''
-  };
-  const save = () => worker.fetch(new Request(url, {
-    method: 'PUT', headers, body: JSON.stringify(state)
-  }), env, {});
-  assert.deepEqual(await (await save()).json(), { ok: true, revision: 1 });
-  const { orders, ...withoutOrders } = state;
-  assert.deepEqual(await (await worker.fetch(new Request(url, { headers }), env, {})).json(), { ...withoutOrders, _revision: 1 });
-  assert.equal((await save()).status, 409);
+  const response = await worker.fetch(new Request('https://example.com/api/state', { method: 'PUT', headers, body: '{}' }), env, {});
+  assert.equal(response.status, 410);
+  assert.match((await response.json()).error, /Recarga/);
 });
