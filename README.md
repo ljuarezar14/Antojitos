@@ -106,6 +106,26 @@ Una base de datos nueva empieza sin usuarios: la primera persona crea la adminis
 - El servidor lo anota con el usuario que tenía la sesión abierta, así que no se puede falsear desde un celular. Se guarda 6 meses.
 - Sirve para aclarar una diferencia de caja: filtra **Pedidos y caja** y revisa ese día.
 
+### 7. 🤝 Deudas por cliente
+- Cada persona que debe tiene **una tarjeta con su saldo total** y debajo el detalle de cada pedido fiado (platos, cremas, nota, quién lo tomó y los abonos).
+- **Un abono para todo**: escribe lo que te paga y la app lo reparte pagando primero la deuda más antigua; antes de registrar te muestra cómo lo aplicará.
+- **Recordar por WhatsApp**: abre un mensaje listo con el saldo, los platos y tu número de Yape. Si guardaste su teléfono, va directo a su chat.
+- **Buscador** por nombre o teléfono (no importan mayúsculas ni tildes).
+
+### 8. 📈 Reportes por semana y mes (Caja → Semana / Mes)
+- Cobros (comparados con el periodo anterior), gastos, ganancia, pedidos y ticket promedio.
+- Cobros por día y mejor día, platos más vendidos, cómo pagaron, qué días de la semana venden más, cuánto se fió y cuánto se recuperó.
+- Con las flechas vas a semanas o meses anteriores; **Enviar reporte por WhatsApp** comparte el resumen.
+
+### 9. ⚡ Atajos al tomar pedidos
+- **Repetir su último pedido**: al elegir un casero aparece su último pedido; un toque lo agrega con las mismas cremas y el precio de hoy. Lo agotado no se agrega y se avisa.
+- **Marcar agotado / Volver a activar**: debajo de cada plato, sin entrar a Carta.
+
+### 10. 🖨️ Ticket en impresora térmica Bluetooth
+- En el ticket, el botón **Térmica** imprime en una impresora Bluetooth de 58 u 80 mm (elige el ancho en Admin → Ticket & Caja). Funciona en **Chrome de Android** (no en iPhone).
+- La primera vez el celular muestra las impresoras cercanas; después recuerda la elegida. **Otra impresora** permite cambiarla.
+- El ticket térmico sale sin tildes ni emojis, porque la mayoría de estas impresoras no los imprime bien. **Imprimir** sigue usando la impresión normal del celular.
+
 ---
 
 ## 💾 Respaldos (Admin → Respaldo)
@@ -139,7 +159,8 @@ Cada cambio se guarda registro por registro con control de versión: si dos celu
 **Desplegar una versión nueva:**
 
 ```bash
-npm test                                  # pruebas del servidor
+npm test                                  # pruebas del servidor y de la lógica
+npm run test:e2e                          # pruebas de pantallas en Chrome (opcional, ~1 min)
 npx wrangler d1 export antojitos-miriam --remote --output respaldo.sql   # copia previa
 npm run cloud:migrate                     # aplica migraciones nuevas, si las hay
 npm run cloud:deploy                      # compila y publica
@@ -150,3 +171,5 @@ npm run cloud:deploy                      # compila y publica
 **Ver los respaldos guardados:** `npx wrangler kv key list --namespace-id cd3ec967f0c54edd8e455f0b0c958bf4 --remote`.
 
 **Desarrollo local:** `npm run dev` levanta la app con la misma API sobre SQLite local (`database/antojitos.sqlite`, Node.js 22 o posterior) y guarda los respaldos en `database/backups/`. `npm start` sirve la versión compilada con Node; requiere `ANTOJITOS_ACCESS_PASSWORD` (16 caracteres o más). El SQLite local y D1 no se sincronizan entre sí.
+
+**Pruebas de pantallas:** `npm run test:e2e` compila la app, crea una base local vacía, levanta el Worker con `wrangler dev` y usa Chrome en tamaño celular: crea la administradora, cobra, fía y salda una deuda, cierra la caja, revisa el reporte, prueba a una ayudante, el modo sin señal, el historial, repetir pedido y agotado. Usa el Chrome instalado; si está en otra ruta, define `CHROME_PATH`.

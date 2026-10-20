@@ -15,8 +15,6 @@ export async function handleApi(request, db, url, backups) {
   const path = url.pathname;
   const under = prefix => path === prefix || path.startsWith(`${prefix}/`);
   if (path === '/api/session' || path === '/api/setup') return handleAuth(request, db, url);
-  // Pages from before per-record storage still call this; they need a reload.
-  if (path === '/api/state') return json({ error: 'Hay una versión nueva de la aplicación. Recarga la página.' }, 410);
   const user = await currentUser(request, db);
   if (!user) return json({ error: 'Tu sesión terminó. Ingresa tu PIN de nuevo.', login: true }, 401);
   if (under('/api/orders')) return handleOrders(request, db, url, user);

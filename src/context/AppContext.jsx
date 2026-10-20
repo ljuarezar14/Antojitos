@@ -104,16 +104,6 @@ const readStoredJson = key => {
   }
 };
 
-// Earlier versions kept every user's PIN in this browser; only the server has them now.
-try {
-  const storedUsers = readStoredJson('antojitos_miriam_users_list');
-  if (storedUsers?.some(user => 'pin' in user)) {
-    localStorage.setItem('antojitos_miriam_users_list', JSON.stringify(storedUsers.map(({ pin, ...user }) => user)));
-  }
-} catch (e) {
-  console.error(e);
-}
-
 const sortOrders =list => [...list].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
 const withOrderStatus = (order, status, at = new Date().toISOString(), by = '') => {

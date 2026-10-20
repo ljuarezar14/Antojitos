@@ -573,6 +573,17 @@ export const SettingsView = () => {
             />
           </Field>
 
+          <Field label="Papel de la impresora Bluetooth">
+            <select
+              value={settings.printerWidth || 32}
+              onChange={(e) => updateSettings({ printerWidth: Number(e.target.value) })}
+              className={inputClass}
+            >
+              <option value={32}>58 mm (la más común)</option>
+              <option value={48}>80 mm</option>
+            </select>
+          </Field>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Meta diaria de ventas (S/)">
               <input

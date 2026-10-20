@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { orderNumberText } from '../domain/orders';
+import { orderNumberText, lastOrderOf, repeatLines } from '../domain/orders';
 import { 
   Plus, 
   Minus, 
@@ -21,7 +21,7 @@ import {
 
 export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => {
   const { menu, orders, addOrder, appendToOpenAccount, accountOrderId, setAccountOrderId,
-    customers, addCustomer, setActiveTab, cremas, categories } = useApp();
+    customers, addCustomer, setActiveTab, cremas, categories, toggleProductAvailability } = useApp();
   const accountOrder = orders.find(order => order.id === accountOrderId && order.openAccount);
 
   const [selectedCategory, setSelectedCategory] = useState('todos');
@@ -105,6 +105,22 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
         cremas: [...defaultCremas]
       }
     ]);
+  };
+
+  // A casero's usual order in one tap.
+  const selectedCustomer = customers.find(customer => customer.id === selectedCustomerId);
+  const lastOrder = !accountOrder && lastOrderOf(orders, selectedCustomer);
+  const [repeatNotice, setRepeatNotice] = useState('');
+  const handleRepeatLast = () => {
+    const { lines, missing } = repeatLines(lastOrder, menu,
+      () => `line-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    setOrderItems(prev => [...prev, ...lines]);
+    setRepeatNotice(missing.length ? `No se agregó (agotado o fuera de la carta): ${missing.join(', ')}.` : '');
+  };
+
+  const handleToggleAvailable = (product) => {
+    if (product.available && !confirm(`¿Marcar "${product.name}" como agotado? No se podrá pedir hasta que lo vuelvas a activar.`)) return;
+    toggleProductAvailability(product.id);
   };
 
   const handleRemoveOneProduct = (productId) => {
@@ -330,6 +346,15 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                     <p className="text-[11px] text-stone-500 dark:text-stone-400 line-clamp-2 mt-0.5 font-medium">
                       {product.description}
                     </p>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleToggleAvailable(product); }}
+                      className={`mt-1 text-[10px] font-black underline underline-offset-2 opacity-100 ${
+                        product.available ? 'text-slate-400 dark:text-stone-500 hover:text-red-600' : 'text-emerald-700 dark:text-emerald-400'
+                      }`}
+                    >
+                      {product.available ? 'Marcar agotado' : 'Volver a activar'}
+                    </button>
                   </div>
 
                   {/* Bottom Bar: Price and Stepper [-] [qty] [+] */}
@@ -486,7 +511,23 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                ) : (
+                ) : null}
+                {selectedCustomerId && lastOrder ? (
+                  <div className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={handleRepeatLast}
+                      className="w-full text-left rounded-xl border-2 border-dashed border-amber-400 dark:border-amber-500/50 px-3 py-2 text-xs hover:bg-amber-50 dark:hover:bg-stone-800"
+                    >
+                      <span className="font-black text-amber-800 dark:text-amber-400">🔁 Repetir su último pedido</span>
+                      <span className="block text-slate-600 dark:text-stone-300 line-clamp-2">
+                        {lastOrder.items.map(item => `${item.quantity || 1} ${String(item.name).trim()}`).join(', ')}
+                      </span>
+                    </button>
+                    {repeatNotice && <p role="status" className="text-[11px] font-bold text-red-600">{repeatNotice}</p>}
+                  </div>
+                ) : null}
+                {accountOrder || selectedCustomerId ? null : (
                   <div className="space-y-1.5">
                     <input
                       type="text"
