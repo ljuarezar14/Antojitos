@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 
 export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
-  const { orders, updateOrderStatus, markOrderAsDebt, cancelOrder, filterDate, todayDateStr, setActiveTab } = useApp();
+  const { orders, updateOrderStatus, markOrderAsDebt, cancelOrder, filterDate, todayDateStr, setActiveTab, can } = useApp();
 
   const [statusFilter, setStatusFilter] = useState('activos'); // 'activos' | 'recibido' | 'preparando' | 'listo' | 'entregado' | 'todos'
   const [debtDraft, setDebtDraft] = useState(null);
@@ -352,7 +352,7 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
                         <span>¡Ya está Listo! 🛎️</span>
                       </button>
 
-                      {!isPaid ? (
+                      {!isPaid ? onOpenPayment && (
                         <button
                           onClick={() => onOpenPayment(order)}
                           className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-xs flex items-center justify-center gap-1 shadow-sm active:scale-98 transition-all"
@@ -373,7 +373,9 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
 
                   {isReady && (
                     <div className="grid grid-cols-2 gap-2">
-                      {!isPaid ? (
+                      {!isPaid && !onOpenPayment ? (
+                        <p className="col-span-2 text-center text-xs font-bold text-slate-500 dark:text-stone-400">Listo para entregar · lo cobra la administradora</p>
+                      ) : !isPaid ? (
                         <button
                           onClick={() => onOpenPayment(order)}
                           className="col-span-2 py-3 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-98 transition-all animate-bounce"
@@ -393,7 +395,7 @@ export const OrdersListView = ({ onOpenPayment, onOpenReceipt }) => {
                     </div>
                   )}
 
-                  {isReady && !isPaid && !order.debt && (
+                  {isReady && !isPaid && !order.debt && can('fiar') && (
                     debtDraft?.id === order.id ? (
                       <form onSubmit={event => {
                         event.preventDefault();

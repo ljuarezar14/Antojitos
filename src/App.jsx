@@ -38,7 +38,7 @@ const UpdateBanner = () => {
 };
 
 const MainContent = () => {
-  const { currentUser, activeTab, theme, dbReady, dataReady, offline, dbError: stateError, syncError, orders } = useApp();
+  const { currentUser, activeTab, theme, dbReady, dataReady, offline, dbError: stateError, syncError, orders, can } = useApp();
   const offlineNotice = offline && !syncError ? 'Sin conexión: trabajando con los datos guardados en este celular. Los cambios se enviarán al volver la señal.' : '';
   const dbError = [stateError, syncError, offlineNotice].filter(Boolean).join(' · ');
   const [paymentOrder, setPaymentOrder] = useState(null);
@@ -47,6 +47,8 @@ const MainContent = () => {
   const liveOrder = order => order && (orders.find(item => item.id === order.id) || order);
   const [preselectedCustomer, setPreselectedCustomer] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
+  // Without the permission the payment buttons are hidden (the views get no handler).
+  const openPayment = can('cobrar') ? setPaymentOrder : null;
 
   if (!dbReady) {
     return <div role={dbError ? 'alert' : undefined} className="min-h-screen grid place-items-center bg-stone-950 px-6 text-center text-amber-400 font-bold">{dbError || 'Abriendo base de datos...'}</div>;
@@ -71,20 +73,20 @@ const MainContent = () => {
       <main className="flex-1">
         {activeTab === 'tomar-pedido' && (
           <TakeOrderView 
-            onOpenPayment={(order) => setPaymentOrder(order)} 
+            onOpenPayment={openPayment} 
             preselectedCustomer={preselectedCustomer}
           />
         )}
 
         {activeTab === 'pedidos-activos' && (
           <OrdersListView 
-            onOpenPayment={(order) => setPaymentOrder(order)}
+            onOpenPayment={openPayment}
             onOpenReceipt={(order) => setReceiptOrder(order)}
           />
         )}
-        {activeTab === 'cuentas' && <OpenAccountsView onOpenPayment={(order) => setPaymentOrder(order)} />}
+        {activeTab === 'cuentas' && <OpenAccountsView onOpenPayment={openPayment} />}
 
-        {activeTab === 'caja' && (
+        {activeTab === 'caja' && can('verCaja') && (
           <CashAndReportsView>
             <DailyCashRegisterView />
           </CashAndReportsView>
@@ -97,7 +99,7 @@ const MainContent = () => {
           />
         )}
 
-        {activeTab === 'menu' && (
+        {activeTab === 'menu' && can('carta') && (
           <MenuManagementView />
         )}
         {activeTab === 'admin' && currentUser.role === 'admin' && <SettingsView />}

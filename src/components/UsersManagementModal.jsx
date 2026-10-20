@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { PERMISSIONS, can } from '../domain/permissions';
 import { 
   Users, 
   UserPlus, 
@@ -12,6 +13,24 @@ import {
   AlertCircle 
 } from 'lucide-react';
 
+// The switches the admin gives each helper; every box shows what the helper can do now.
+const PermissionsChecklist = ({ user, onChange }) => (
+  <fieldset className="space-y-1.5">
+    <legend className="text-[11px] font-bold text-slate-600 dark:text-stone-400 mb-1">Permisos:</legend>
+    {PERMISSIONS.map(({ key, label }) => (
+      <label key={key} className="flex items-center gap-2 text-xs text-slate-700 dark:text-stone-200">
+        <input
+          type="checkbox"
+          checked={can(user, key)}
+          onChange={(e) => onChange({ ...(user.permissions || {}), [key]: e.target.checked })}
+          className="w-4 h-4 accent-amber-500"
+        />
+        <span>{label}</span>
+      </label>
+    ))}
+  </fieldset>
+);
+
 export const UsersManagementModal = ({ onClose, inline = false }) => {
   const { users, addUser, updateUser, deleteUser, currentUser } = useApp();
 
@@ -23,6 +42,7 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
   const [newRole, setNewRole] = useState('ayudante');
   const [newPin, setNewPin] = useState('');
   const [newAvatar, setNewAvatar] = useState('🧑‍🍳');
+  const [newPermissions, setNewPermissions] = useState({});
   const [errorMsg, setErrorMsg] = useState('');
 
   const handleCreate = (e) => {
@@ -40,7 +60,8 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
       name: newName,
       role: newRole,
       pin: newPin,
-      avatar: newAvatar
+      avatar: newAvatar,
+      permissions: newPermissions
     });
 
     setIsCreating(false);
@@ -48,6 +69,7 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
     setNewRole('ayudante');
     setNewPin('');
     setNewAvatar('🧑‍🍳');
+    setNewPermissions({});
     setErrorMsg('');
   };
 
@@ -193,6 +215,10 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
                 </div>
               </div>
 
+              {newRole === 'ayudante' && (
+                <PermissionsChecklist user={{ role: 'ayudante', permissions: newPermissions }} onChange={setNewPermissions} />
+              )}
+
               <div className="flex gap-2 pt-1">
                 <button
                   type="submit"
@@ -232,6 +258,14 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
                         <KeyRound className="w-3 h-3 text-amber-500" />
                         <span className="font-mono font-bold">PIN: ••••</span>
                       </div>
+                      {u.role !== 'admin' && (
+                        <p className="text-[10px] text-slate-500 dark:text-stone-400 mt-0.5">
+                          {(() => {
+                            const missing = PERMISSIONS.filter(({ key }) => !can(u, key)).length;
+                            return missing ? `${PERMISSIONS.length - missing} de ${PERMISSIONS.length} permisos` : 'Todos los permisos';
+                          })()}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -303,6 +337,10 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
                   />
                 </div>
               </div>
+
+              {editingUser.role === 'ayudante' && (
+                <PermissionsChecklist user={editingUser} onChange={(permissions) => setEditingUser({ ...editingUser, permissions })} />
+              )}
 
               <div className="flex gap-2 pt-1">
                 <button

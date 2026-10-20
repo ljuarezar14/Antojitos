@@ -21,7 +21,7 @@ import {
 
 export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => {
   const { menu, orders, addOrder, appendToOpenAccount, accountOrderId, setAccountOrderId,
-    customers, addCustomer, setActiveTab, cremas, categories, toggleProductAvailability } = useApp();
+    customers, addCustomer, setActiveTab, cremas, categories, toggleProductAvailability, can } = useApp();
   const accountOrder = orders.find(order => order.id === accountOrderId && order.openAccount);
 
   const [selectedCategory, setSelectedCategory] = useState('todos');
@@ -346,7 +346,7 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                     <p className="text-[11px] text-stone-500 dark:text-stone-400 line-clamp-2 mt-0.5 font-medium">
                       {product.description}
                     </p>
-                    <button
+                    {can('carta') && <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleToggleAvailable(product); }}
                       className={`mt-1 text-[10px] font-black underline underline-offset-2 opacity-100 ${
@@ -354,7 +354,7 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                       }`}
                     >
                       {product.available ? 'Marcar agotado' : 'Volver a activar'}
-                    </button>
+                    </button>}
                   </div>
 
                   {/* Bottom Bar: Price and Stepper [-] [qty] [+] */}
@@ -756,7 +756,7 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                 {accountOrder ? <div className="grid grid-cols-2 gap-2">
                   <button type="button" onClick={() => { handleClearCart(); setAccountOrderId(null); setActiveTab('cuentas'); }} className="rounded-xl border border-stone-300 dark:border-stone-700 px-3 py-3 text-xs font-black text-stone-700 dark:text-stone-200">Volver</button>
                   <button type="button" disabled={orderItems.length === 0 || isSubmitting} onClick={() => handleCreateOrder()} className="rounded-xl bg-amber-500 px-3 py-3 text-xs font-black text-stone-950 disabled:opacity-50">Agregar a cuenta</button>
-                </div> : <div className="grid grid-cols-2 gap-2">
+                </div> : <div className={`grid gap-2 ${onOpenPayment ? 'grid-cols-2' : 'grid-cols-1'}`}>
                   <button
                     type="button"
                     disabled={orderItems.length === 0 || isSubmitting}
@@ -767,7 +767,7 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                     <span>A Preparar ⏱️</span>
                   </button>
 
-                  <button
+                  {onOpenPayment && <button
                     type="button"
                     disabled={orderItems.length === 0 || isSubmitting}
                     onClick={() => handleCreateOrder(true)}
@@ -775,7 +775,7 @@ export const TakeOrderView = ({ onOpenPayment, preselectedCustomer = null }) => 
                   >
                     <CreditCard className="w-4 h-4" />
                     <span>Cobrar Ahora 💵</span>
-                  </button>
+                  </button>}
                 </div>
                 }
                 {!accountOrder && <button type="button" disabled={orderItems.length === 0 || isSubmitting} onClick={() => handleCreateOrder(false, true)} className="w-full rounded-xl border-2 border-amber-500 bg-amber-100 dark:bg-stone-800 px-3 py-3 text-sm font-black text-amber-950 dark:text-amber-400 disabled:opacity-50">Abrir cuenta para cobrar al retirarse</button>}

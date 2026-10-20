@@ -40,7 +40,8 @@ export const DailyCashRegisterView = () => {
     settings,
     dbError,
     pendingChanges,
-    dayClosing
+    dayClosing,
+    can
   } = useApp();
 
   const [expenseDesc, setExpenseDesc] = useState('');
@@ -412,6 +413,7 @@ export const DailyCashRegisterView = () => {
             </div>
 
             {/* Quick Expense Presets */}
+            {can('gastos') && <>
             <div className="flex flex-wrap gap-1.5 mb-3">
               <span className="text-[11px] font-bold text-slate-400 dark:text-stone-500 self-center">Atajos:</span>
               {expensePresets.map((preset) => (
@@ -456,6 +458,7 @@ export const DailyCashRegisterView = () => {
                 <span>Registrar</span>
               </button>
             </form>
+            </>}
 
             {/* Expenses List */}
             {filteredExpenses.length === 0 ? (
@@ -479,13 +482,13 @@ export const DailyCashRegisterView = () => {
                       <span className="font-black text-red-600 dark:text-red-400">
                         -S/ {expense.amount.toFixed(2)}
                       </span>
-                      <button
+                      {can('gastos') && <button
                         onClick={() => deleteExpense(expense.id)}
                         className="text-slate-400 hover:text-red-500 p-1"
                         title="Eliminar gasto"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      </button>}
                     </div>
                   </div>
                 ))}

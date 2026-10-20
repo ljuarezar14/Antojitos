@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { useSyncedCollection, syncRequest, SESSION_EXPIRED } from '../sync/useSyncedCollection';
 import { DEFAULT_MENU, DEFAULT_CREMAS, DEFAULT_CATEGORIES } from '../data/defaultMenu';
 import { debtBalance, paymentEvents } from '../domain/finance';
+import { can as userCan } from '../domain/permissions';
 
 const AppContext = createContext();
 
@@ -175,6 +176,8 @@ export const AppProvider = ({ children }) => {
   const { list: closings, setList: setClosings } = closingsStore;
   // Who did it, shown on the order and in the receipt; the server keeps its own history too.
   const by = () => currentUser?.name || '';
+  // Read from the synced users list, so a permission the admin changes applies at once.
+  const can = key => userCan(users.find(u => u.id === currentUser?.id) || currentUser, key);
 
   const setConfigValue = (id, update) => setConfig(previous => {
     const current = previous.find(item => item.id === id);
@@ -432,7 +435,8 @@ export const AppProvider = ({ children }) => {
       name: userData.name.trim(),
       role: userData.role || 'ayudante',
       pin: userData.pin.toString().trim(),
-      avatar: userData.avatar || (userData.role === 'admin' ? '👩‍🍳' : '🧑‍🍳')
+      avatar: userData.avatar || (userData.role === 'admin' ? '👩‍🍳' : '🧑‍🍳'),
+      ...(userData.role !== 'admin' && userData.permissions ? { permissions: userData.permissions } : {})
     };
     setUsers(prev => [...prev, newUser]);
     return newUser;
@@ -530,6 +534,7 @@ export const AppProvider = ({ children }) => {
   };
 
   const payOrder = (orderId, paymentData) => {
+    if (!can('cobrar')) return false;
     // Customer stats are derived from the orders, so only the order changes here.
     setOrders(prev => prev.map(order => {
       if (order.id !== orderId) return order;
@@ -551,7 +556,7 @@ export const AppProvider = ({ children }) => {
   const markOrderAsDebt = (orderId, debtorName, debtorPhone = '') => {
     const order = orders.find(item => item.id === orderId);
     const name = debtorName?.trim();
-    if (!order || order.status !== 'listo' || order.payment || order.debt ||
+    if (!can('fiar') || !order || order.status !== 'listo' || order.payment || order.debt ||
         !name || name.toLowerCase() === 'cliente al paso') return false;
     const now = new Date().toISOString();
     setOrders(previous => previous.map(item => item.id === orderId ? {
@@ -564,7 +569,7 @@ export const AppProvider = ({ children }) => {
 
   // allocations: [{ orderId, amount }], e.g. one payment spread over a customer's debts.
   const recordDebtPayments = (allocations, method) => {
-    if (!['efectivo', 'yape', 'plin', 'tarjeta', 'otro'].includes(method) || !allocations?.length) return false;
+    if (!can('cobrar') || !['efectivo', 'yape', 'plin', 'tarjeta', 'otro'].includes(method) || !allocations?.length) return false;
     const valid = allocations.every(({ orderId, amount }) => {
       const order = orders.find(item => item.id === orderId);
       const cents = Math.round(Number(amount) * 100);
@@ -634,6 +639,7 @@ export const AppProvider = ({ children }) => {
 
   // Expenses
   const addExpense = (description, amount) => {
+    if (!can('gastos')) return false;
     const newExpense = {
       id: `EXP-${crypto.randomUUID()}`,
       date: filterDate,
@@ -646,11 +652,13 @@ export const AppProvider = ({ children }) => {
   };
 
   const deleteExpense = (expenseId) => {
+    if (!can('gastos')) return false;
     setExpenses(prev => prev.filter(e => e.id !== expenseId));
   };
 
   // Menu Management
   const toggleProductAvailability = (productId) => {
+    if (!can('carta')) return false;
     setMenu(prev => prev.map(p => {
       if (p.id === productId) {
         return { ...p, available: !p.available };
@@ -790,7 +798,7 @@ export const AppProvider = ({ children }) => {
   const dayClosing = closings.find(closing => closing.date === filterDate) || null;
   const closeCashRegister = ({ countedCash, notes = '' }) => {
     const counted = round(Number(countedCash));
-    if (!Number.isFinite(counted) || counted < 0 || dayClosing) return false;
+    if (!can('cerrarCaja') || !Number.isFinite(counted) || counted < 0 || dayClosing) return false;
     setClosings(previous => [...previous, {
       id: `cierre-${filterDate}`, date: filterDate, countedCash: counted, expectedCash,
       difference: round(counted - expectedCash), initialCash, cashSales: round(cashSales), yapePlinSales: round(yapePlinSales),
@@ -800,7 +808,7 @@ export const AppProvider = ({ children }) => {
     return true;
   };
   const reopenCashRegister = date => {
-    if (currentUser?.role !== 'admin') return false;
+    if (!can('cambiarCierre')) return false;
     setClosings(previous => previous.filter(closing => closing.date !== date));
     return true;
   };
@@ -809,6 +817,7 @@ export const AppProvider = ({ children }) => {
     <AppContext.Provider
       value={{
         currentUser,
+        can,
         users,
         login,
         logout,

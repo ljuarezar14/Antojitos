@@ -26,7 +26,7 @@ export const OpenAccountsView = ({ onOpenPayment }) => {
       <div className="text-sm text-slate-700 dark:text-stone-200">{(order.items || []).map((item, index) => <span key={item.lineId || index} className="inline-block mr-3">{item.quantity || 1} × {item.name}</span>)}</div>
       <div className="flex flex-wrap gap-2 border-t border-slate-200 dark:border-stone-700 pt-3">
         <button type="button" onClick={() => { setAccountOrderId(order.id); setActiveTab('tomar-pedido'); }} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-black text-stone-950">Agregar consumo</button>
-        <button type="button" onClick={() => onOpenPayment(order)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white">Cobrar cuenta completa</button>
+        {onOpenPayment && <button type="button" onClick={() => onOpenPayment(order)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white">Cobrar cuenta completa</button>}
         {order.status === 'recibido' && <button type="button" onClick={() => updateOrderStatus(order.id, 'preparando')} className="rounded-xl border border-stone-300 dark:border-stone-700 px-4 py-2 text-sm font-bold text-slate-700 dark:text-stone-200">Iniciar preparación</button>}
         {order.status === 'preparando' && <button type="button" onClick={() => updateOrderStatus(order.id, 'listo')} className="rounded-xl border border-stone-300 dark:border-stone-700 px-4 py-2 text-sm font-bold text-slate-700 dark:text-stone-200">Marcar listo</button>}
       </div>

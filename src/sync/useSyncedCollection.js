@@ -199,9 +199,15 @@ export function useSyncedCollection({
             const serverFields = confirmed.orderNumber === undefined
               ? { _seq: confirmed._seq }
               : { _seq: confirmed._seq, orderNumber: confirmed.orderNumber };
-            setList(previous => previous.map(item => item.id !== id ? item
+            const merged = current && current !== sent ? { ...current, ...serverFields } : null;
+            const withServer = item => item.id !== id ? item
               : item === sent ? confirmed
-              : { ...item, ...serverFields }));
+              : item === current ? merged
+              : { ...item, ...serverFields };
+            // The next pass of this loop runs before React re-renders, so it must already see
+            // the new _seq; otherwise it would send the old one and get a false conflict.
+            listRef.current = listRef.current.map(withServer);
+            setList(previous => previous.map(withServer));
             if (current !== sent) flushAgain.current = true;
           }
           saveSync();

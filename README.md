@@ -32,18 +32,21 @@
 
 Después de 5 PIN incorrectos, ese usuario queda bloqueado 5 minutos.
 
-**Qué puede hacer cada rol:**
+**Permisos de cada ayudante:** al crear o editar a una ayudante, la administradora marca qué puede hacer. Lo que no tiene marcado no le aparece en la pantalla, y el servidor tampoco lo acepta aunque lo intente. El cambio vale al instante y queda en el historial.
 
-| | Ayudante | Administradora |
-|---|---|---|
-| Tomar, preparar, cobrar y fiar pedidos | ✅ | ✅ |
-| Cancelar pedidos (siguen visibles como cancelados) | ✅ | ✅ |
-| **Eliminar** pedidos | ❌ | ✅ |
-| Caseros, carta, cremas y gastos | ✅ | ✅ |
-| Cerrar la caja del día | ✅ | ✅ |
-| Cambiar o reabrir una caja ya cerrada | ❌ | ✅ |
-| Usuarios, categorías, ajustes, QR y logo | ❌ | ✅ |
-| Respaldos e historial de cambios | ❌ | ✅ |
+| Permiso | Al crear una ayudante |
+|---|---|
+| Cobrar pedidos y recibir abonos | ✅ marcado |
+| Entregar pedidos fiados | ✅ marcado |
+| Ver la caja y los reportes | ✅ marcado |
+| Cerrar la caja del día | ✅ marcado |
+| Anotar y borrar gastos | ✅ marcado |
+| Cambiar la carta, las cremas y lo agotado | ✅ marcado |
+| Reabrir o corregir un cierre de caja | ❌ sin marcar |
+
+Toda ayudante puede siempre tomar, preparar y cancelar pedidos (los cancelados siguen visibles) y registrar caseros. Solo la administradora puede **eliminar** pedidos y manejar usuarios, categorías, ajustes, QR, logo, respaldos e historial.
+
+"Ver la caja" oculta la pestaña Caja y los reportes; los pedidos de cada día se siguen viendo en Pedidos.
 
 Una base de datos nueva empieza sin usuarios: la primera persona crea la administradora. Siempre debe quedar al menos una administradora.
 
@@ -168,4 +171,4 @@ npm run cloud:deploy                      # compila y publica
 
 **Desarrollo local:** `npm run dev` levanta la app con la misma API sobre SQLite local (`database/antojitos.sqlite`, Node.js 22 o posterior) y guarda los respaldos en `database/backups/`. `npm start` sirve la versión compilada con Node; requiere `ANTOJITOS_ACCESS_PASSWORD` (16 caracteres o más). El SQLite local y D1 no se sincronizan entre sí.
 
-**Pruebas de pantallas:** `npm run test:e2e` compila la app, crea una base local vacía, levanta el Worker con `wrangler dev` y usa Chrome en tamaño celular: crea la administradora, cobra, fía y salda una deuda, cierra la caja, revisa el reporte, prueba a una ayudante, el modo sin señal, el historial, repetir pedido y agotado. Usa el Chrome instalado; si está en otra ruta, define `CHROME_PATH`.
+**Pruebas de pantallas:** `npm run test:e2e` compila la app, crea una base local vacía, levanta el Worker con `wrangler dev` y usa Chrome en tamaño celular: crea la administradora, cobra, fía y salda una deuda, cierra la caja, revisa el reporte, prueba a una ayudante y sus permisos, el modo sin señal, el historial, repetir pedido y agotado. Usa el Chrome instalado; si está en otra ruta, define `CHROME_PATH`.

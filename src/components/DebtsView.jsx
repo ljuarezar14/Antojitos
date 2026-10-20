@@ -105,10 +105,10 @@ const DebtorCard = ({ group, settings, onPay }) => {
 
       {group.balance > 0 && !paying && (
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => { setPaying(true); setAmount(group.balance.toFixed(2)); setError(''); }}
+          {onPay && <button type="button" onClick={() => { setPaying(true); setAmount(group.balance.toFixed(2)); setError(''); }}
             className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-black text-stone-950">
             Registrar pago o abono
-          </button>
+          </button>}
           <button type="button" onClick={remind}
             className="rounded-xl bg-emerald-600 hover:bg-emerald-700 px-4 py-2 text-sm font-black text-white flex items-center gap-1.5">
             <MessageCircle className="w-4 h-4" /> Recordar por WhatsApp
@@ -164,7 +164,7 @@ const DebtorCard = ({ group, settings, onPay }) => {
 };
 
 export const DebtsView = () => {
-  const { orders, customers, settings, recordDebtPayments, dbError } = useApp();
+  const { orders, customers, settings, recordDebtPayments, dbError, can } = useApp();
   const [showSettled, setShowSettled] = useState(false);
   const [query, setQuery] = useState('');
   const groups = groupDebts(orders, customers, { includeSettled: showSettled });
@@ -209,7 +209,7 @@ export const DebtsView = () => {
           {query.trim() ? `Nadie con deudas coincide con «${query.trim()}».` : 'No hay deudas pendientes.'}
         </div>
       ) : shown.map(group => (
-        <DebtorCard key={group.key} group={group} settings={settings} onPay={pay} />
+        <DebtorCard key={group.key} group={group} settings={settings} onPay={can('cobrar') ? pay : null} />
       ))}
     </div>
   );

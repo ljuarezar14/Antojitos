@@ -136,6 +136,24 @@ test('cualquiera cierra la caja, pero solo la administradora cambia un cierre', 
   assert.match(log[0].detail, /contado S\/ 95\.00, esperado S\/ 100\.00/);
 });
 
+test('la administradora da y quita permisos a cada ayudante', async () => {
+  const limited = { id: 'u8', name: 'Pedro', role: 'ayudante', permissions: { gastos: false, carta: false, cerrarCaja: false } };
+  assert.equal((await call('POST', '/api/data/expenses', { id: 'e7', date: '2026-10-18', description: 'Hielo', amount: 5 }, limited)).status, 403);
+  assert.equal((await call('POST', '/api/data/menu', { id: 'p7', name: 'Chicha', price: 1 }, limited)).status, 403);
+  assert.equal((await call('POST', '/api/data/closings', closing('2026-10-19', 90), limited)).status, 403);
+  assert.equal((await call('POST', '/api/data/customers', { id: 'c7', name: 'Rosa' }, limited)).status, 200);
+
+  const trusted = { id: 'u9', name: 'Lucía', role: 'ayudante', permissions: { cambiarCierre: true } };
+  const created = await call('POST', '/api/data/closings', closing('2026-10-20', 90), trusted);
+  assert.equal((await call('PUT', '/api/data/closings/cierre-2026-10-20', { item: closing('2026-10-20', 99), baseSeq: created.body.item._seq }, trusted)).status, 200);
+
+  // Only known permissions with yes/no values are stored, and the change is in the history.
+  assert.equal((await call('POST', '/api/data/users', { id: 'u10', name: 'Ana', role: 'ayudante', pin: '1111', permissions: { volar: true } })).status, 400);
+  const { body: ana } = await call('POST', '/api/data/users', { id: 'u10', name: 'Ana', role: 'ayudante', pin: '1111' });
+  await call('PUT', '/api/data/users/u10', { item: { ...ana.item, permissions: { cobrar: false } }, baseSeq: ana.item._seq });
+  assert.match(sqlite.prepare("SELECT detail FROM audit_log WHERE entity_id = 'u10' AND action = 'editar'").get().detail, /ya no puede: cobrar pedidos/);
+});
+
 test('el historial registra precios cambiados y gastos eliminados', async () => {
   const { body: added } = await call('POST', '/api/data/expenses', { id: 'e1', date: '2026-10-18', description: 'Hielo', amount: 5 });
   await call('DELETE', '/api/data/expenses/e1');

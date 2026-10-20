@@ -12,7 +12,7 @@ const differenceClass = difference => difference === 0 ? 'text-emerald-600 dark:
 export const CashClosingCard = () => {
   const {
     filterDate, todayDateStr, expectedCash, cashSales, totalSales, totalExpenses, settings,
-    dayClosing, closeCashRegister, reopenCashRegister, currentUser, pendingChanges
+    dayClosing, closeCashRegister, reopenCashRegister, currentUser, pendingChanges, can
   } = useApp();
   const [counted, setCounted] = useState('');
   const [notes, setNotes] = useState('');
@@ -58,7 +58,7 @@ export const CashClosingCard = () => {
             {currentUser?.role === 'admin' ? ' Revisa quién lo cambió en Admin › Historial.' : ''}
           </p>
         )}
-        {currentUser?.role === 'admin' && (
+        {can('cambiarCierre') && (
           <button
             type="button"
             onClick={() => { if (confirm('¿Reabrir la caja de este día? El cierre guardado se borrará y se podrá cerrar de nuevo.')) reopenCashRegister(dayClosing.date); }}
@@ -68,6 +68,14 @@ export const CashClosingCard = () => {
           </button>
         )}
       </div>
+    );
+  }
+
+  if (!can('cerrarCaja')) {
+    return (
+      <p className="bg-white dark:bg-stone-900 p-4 rounded-2xl border border-slate-200 dark:border-stone-800 text-xs text-slate-600 dark:text-stone-300">
+        <Lock className="inline w-3.5 h-3.5 mr-1 text-amber-500" />La caja de este día aún no está cerrada. La cierra la administradora.
+      </p>
     );
   }
 

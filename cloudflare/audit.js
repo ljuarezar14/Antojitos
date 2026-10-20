@@ -2,6 +2,8 @@
 // difference in the cash register can be traced. The server writes it with the signed-in
 // user, so a device cannot fake it. Admin › Historial shows it.
 
+import { PERMISSIONS, can } from '../src/domain/permissions.js';
+
 const KEEP_DAYS = 180;
 const MAX_ENTRIES = 1000;
 
@@ -49,7 +51,11 @@ export function describeOrderChange(before, after) {
 
 export function describeRecord(collection, item, before) {
   switch (collection) {
-    case 'users': return `Usuario ${item.name} (${item.role})`;
+    case 'users': {
+      const changed = PERMISSIONS.filter(({ key }) => before && can(before, key) !== can(item, key))
+        .map(({ key, label }) => `${can(item, key) ? 'puede' : 'ya no puede'}: ${label.toLowerCase()}`);
+      return `Usuario ${item.name} (${item.role})${changed.length ? ` · ${changed.join('; ')}` : ''}`;
+    }
     case 'customers': return `Casero ${item.name}`;
     case 'categories': return `Categoría ${item.name}`;
     case 'cremas': return `Crema ${item.name}`;

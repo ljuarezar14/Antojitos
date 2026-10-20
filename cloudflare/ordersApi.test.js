@@ -104,6 +104,30 @@ test('una ayudante no puede eliminar pedidos, solo cancelarlos', async () => {
   assert.ok((await call(handleOrders, 'GET', '/api/orders?since=0')).body.orders.some(o => o.id === 'h1'));
 });
 
+test('una ayudante sin permiso no puede cobrar, abonar ni fiar', async () => {
+  const helper = { id: 'u3', name: 'Pedro', role: 'ayudante', permissions: { cobrar: false, fiar: false } };
+  const as = async (method, path, body) => {
+    const url = new URL(path, 'https://example.com');
+    const response = await handleOrders(new Request(url, { method, body: JSON.stringify(body) }), db, url, helper);
+    return { status: response.status, body: await response.json() };
+  };
+  const { body: { order: created } } = await as('POST', '/api/orders', order('np1'));
+  assert.equal((await as('PUT', '/api/orders/np1', { order: { ...created, status: 'listo' }, baseSeq: created._seq })).status, 200);
+  const ready = (await call(handleOrders, 'GET', '/api/orders?since=0')).body.orders.find(o => o.id === 'np1');
+  const paid = await as('PUT', '/api/orders/np1', { order: { ...ready, payment: { method: 'efectivo', amountPaid: 6 } }, baseSeq: ready._seq });
+  assert.equal(paid.status, 403);
+  assert.match(paid.body.error, /permiso para cobrar/);
+  assert.equal((await as('PUT', '/api/orders/np1', { order: { ...ready, debt: { createdAt: 'x' }, debtPayments: [] }, baseSeq: ready._seq })).status, 403);
+  assert.equal((await as('POST', '/api/orders', order('np2', { payment: { method: 'yape', amountPaid: 6 } }))).status, 403);
+
+  const { body: { order: owed } } = await call(handleOrders, 'POST', '/api/orders', order('np3', { debt: { createdAt: 'x' }, debtPayments: [] }));
+  const abono = { ...owed, debtPayments: [{ id: 'ab1', amount: 2, method: 'efectivo', paidAt: 'x' }] };
+  assert.equal((await as('PUT', '/api/orders/np3', { order: abono, baseSeq: owed._seq })).status, 403);
+  // With the permission given, the same payment goes through.
+  helper.permissions.cobrar = true;
+  assert.equal((await as('PUT', '/api/orders/np3', { order: abono, baseSeq: owed._seq })).status, 200);
+});
+
 test('cada cambio de pedido queda en el historial con quién lo hizo', async () => {
   const lucia = { id: 'u2', name: 'Lucía', role: 'ayudante' };
   const as = async (method, path, body) => {

@@ -43,7 +43,7 @@ const equal = (a, b) => {
 // Fields that only the server may see.
 export const publicUser = ({ pin, pinHash, pinSalt, _seq, ...user }) => user;
 
-const loginUser = user => ({ id: user.id, name: user.name, role: user.role, avatar: user.avatar });
+const loginUser = user => ({ id: user.id, name: user.name, role: user.role, avatar: user.avatar, permissions: user.permissions });
 
 async function activeUsers(db) {
   const { results } = await db.prepare("SELECT * FROM records WHERE collection = 'users' AND deleted = 0 ORDER BY seq").all();

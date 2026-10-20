@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { UsersManagementModal } from './UsersManagementModal';
 import { 
   ShoppingBag, 
   Clock, 
@@ -33,7 +34,8 @@ export const Navbar = () => {
     logout, 
     theme, 
     toggleTheme,
-    settings
+    settings,
+    can
   } = useApp();
 
   const [showUsersModal, setShowUsersModal] = useState(false);
@@ -109,7 +111,7 @@ export const Navbar = () => {
       icon: Settings,
       badge: null,
     }] : [])
-  ];
+  ].filter(item => (item.id !== 'caja' || can('verCaja')) && (item.id !== 'menu' || can('carta')));
 
   return (
     <>

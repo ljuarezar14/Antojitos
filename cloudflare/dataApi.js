@@ -3,15 +3,18 @@
 
 import { hashPin, publicUser, validPin } from './auth.js';
 import { describeRecord, logChange } from './audit.js';
+import { can, validPermissions } from '../src/domain/permissions.js';
 
 export const COLLECTIONS = ['users', 'customers', 'categories', 'cremas', 'menu', 'expenses', 'config', 'closings'];
 const MAX_RECORD_BYTES = 100_000;
-// Helpers can take orders and keep customers, the menu and expenses up to date;
-// users, settings and categories are for the admin only.
+// Users, settings and categories are for the admin only; the rest of what a helper
+// may change depends on the permissions the admin gave her.
 const ADMIN_ONLY = new Set(['users', 'config', 'categories']);
+const NEEDS_PERMISSION = { expenses: 'gastos', menu: 'carta', cremas: 'carta' };
 const FORBIDDEN = 'Solo la administradora puede cambiar esto.';
-// Anyone can close the day's cash register; once closed, only the admin can change it.
-const CLOSED = 'La caja de ese día ya está cerrada. Solo la administradora puede cambiar el cierre.';
+const NOT_ALLOWED = 'No tienes permiso para hacer esto. Pídeselo a la administradora.';
+// Closing the day's cash register and changing a closed one are separate permissions.
+const CLOSED = 'La caja de ese día ya está cerrada. No tienes permiso para cambiar el cierre.';
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), {
@@ -23,7 +26,8 @@ const validRecord = (collection, item) => {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
   if (typeof item.id !== 'string' || !/^[\w-]{1,80}$/.test(item.id)) return false;
   if (collection === 'users') {
-    return typeof item.name === 'string' && ['admin', 'ayudante'].includes(item.role) && (item.pin === undefined || validPin(item.pin));
+    return typeof item.name === 'string' && ['admin', 'ayudante'].includes(item.role) &&
+      (item.pin === undefined || validPin(item.pin)) && validPermissions(item.permissions);
   }
   if (collection === 'config') {
     if (item.id === 'greeting') return typeof item.value === 'string';
@@ -142,6 +146,8 @@ export async function handleData(request, db, url, user) {
   }
   if (!COLLECTIONS.includes(collection) || rest.length) return json({ error: 'No encontrado' }, 404);
   if (ADMIN_ONLY.has(collection) && !isAdmin) return json({ error: FORBIDDEN }, 403);
+  if (NEEDS_PERMISSION[collection] && !can(user, NEEDS_PERMISSION[collection])) return json({ error: NOT_ALLOWED }, 403);
+  const mayChangeClosing = can(user, 'cambiarCierre');
 
   if (!rawId) {
     if (request.method !== 'POST') return json({ error: 'Método no permitido' }, 405);
@@ -151,7 +157,8 @@ export async function handleData(request, db, url, user) {
     let item = value;
     const existing = await db.prepare('SELECT data FROM records WHERE collection = ? AND id = ? AND deleted = 0').bind(collection, value.id).first();
     const before = existing && JSON.parse(existing.data);
-    if (collection === 'closings' && before && !isAdmin) return json({ error: CLOSED }, 403);
+    if (collection === 'closings' && before && !mayChangeClosing) return json({ error: CLOSED }, 403);
+    if (collection === 'closings' && !before && !can(user, 'cerrarCaja')) return json({ error: NOT_ALLOWED }, 403);
     if (collection === 'users') {
       item = await withPinHash(value, before);
       if (!item) return json({ error: 'El PIN debe tener 4 números' }, 400);
@@ -171,7 +178,7 @@ export async function handleData(request, db, url, user) {
 
   const id = decodeURIComponent(rawId);
   if (!/^[\w-]{1,80}$/.test(id)) return json({ error: 'No encontrado' }, 404);
-  if (collection === 'closings' && !isAdmin) return json({ error: CLOSED }, 403);
+  if (collection === 'closings' && !mayChangeClosing) return json({ error: CLOSED }, 403);
   if (request.method === 'DELETE') {
     if (collection === 'users' && !(await adminCount(db, id))) return json({ error: 'Debe quedar al menos una administradora.' }, 400);
     const existing = await db.prepare('SELECT data FROM records WHERE collection = ? AND id = ? AND deleted = 0').bind(collection, id).first();

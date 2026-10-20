@@ -170,6 +170,37 @@ test('una ayudante toma pedidos pero no puede eliminarlos ni ver el historial', 
   await helper.context.close();
 });
 
+test('la administradora quita permisos a una ayudante y ella deja de ver esos botones', async () => {
+  const { page, errors } = admin;
+  // Lucía was created through the API, so reload to see her without waiting for the next poll.
+  await page.reload();
+  await page.getByText('A Preparar').first().waitFor();
+  await page.getByTitle('Administrar usuarios y crear nuevos').click();
+  await page.locator('div.rounded-2xl', { hasText: 'Lucía' }).getByTitle('Editar usuario o cambiar PIN').click();
+  await page.getByLabel('Cobrar pedidos y recibir abonos').uncheck();
+  await page.getByLabel('Ver la caja y los reportes').uncheck();
+  await page.getByText('Guardar Cambios').click();
+  await page.getByText('4 de 7 permisos').waitFor();
+  await page.locator('.fixed.inset-0 button:has(svg.lucide-x)').first().click();
+  await waitSynced(page);
+
+  const helper = await phone();
+  await login(helper.page, 'Lucía', HELPER_PIN);
+  await helper.page.getByText(dish, { exact: true }).first().click();
+  assert.equal(await helper.page.getByText('Cobrar Ahora').count(), 0);
+  assert.equal(await helper.page.getByText('Caja', { exact: true }).locator('visible=true').count(), 0);
+  await tab(helper.page, 'Pedidos');
+  assert.equal(await helper.page.getByText(/^Cobrar/).locator('visible=true').count(), 0);
+  const order = (await ordersOnServer(helper.page)).find(item => item.createdBy === 'Lucía');
+  const paid = await api(helper.page, `/api/orders/${order.id}`, {
+    method: 'PUT', body: JSON.stringify({ order: { ...order, payment: { method: 'efectivo', amountPaid: order.total } }, baseSeq: order._seq })
+  });
+  assert.equal(paid.status, 403);
+  assert.deepEqual(helper.errors, []);
+  assert.deepEqual(errors, []);
+  await helper.context.close();
+});
+
 test('sin señal el pedido queda con número provisional y se envía al volver', async () => {
   const { page, context } = admin;
   const before = (await ordersOnServer(page)).length;

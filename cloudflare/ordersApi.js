@@ -2,12 +2,22 @@
 // each other's work. `db` is a D1 database (or the local adapter with the same API).
 
 import { describeDeletedOrder, describeNewOrder, describeOrderChange, logChange } from './audit.js';
+import { can, orderPermissionNeeded } from '../src/domain/permissions.js';
 
 const STATUSES = ['recibido', 'preparando', 'listo', 'entregado', 'cancelado'];
 const MAX_ORDER_BYTES = 100_000;
 const MAX_FILE_BYTES = 1_500_000;
 const FILES = new Set(['yape-qr', 'logo']);
 const FORBIDDEN = 'Solo la administradora puede cambiar esto.';
+const NOT_ALLOWED = {
+  cobrar: 'No tienes permiso para cobrar. Pídele a la administradora que lo cobre o que te dé el permiso.',
+  fiar: 'No tienes permiso para fiar. Pídele a la administradora que lo autorice.'
+};
+// Taking money and giving credit depend on the helper's permissions.
+const refused = (user, before, after) => {
+  const needed = orderPermissionNeeded(before, after);
+  return needed && !can(user, needed) ? json({ error: NOT_ALLOWED[needed] }, 403) : null;
+};
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -39,6 +49,8 @@ const storedData = order => {
 const NEXT_SEQ = '(SELECT COALESCE(MAX(seq), 0) + 1 FROM order_records)';
 
 async function createOrder(db, order, user) {
+  const denied = refused(user, null, order);
+  if (denied) return denied;
   const now = new Date().toISOString();
   // A single statement is atomic, so the day's next number can never be handed out twice.
   const { meta } = await db.prepare(`INSERT INTO order_records (id, date, order_number, data, created_at, updated_at, seq, deleted)
@@ -54,6 +66,8 @@ async function createOrder(db, order, user) {
 
 async function updateOrder(db, id, order, baseSeq, user) {
   const before = await db.prepare('SELECT * FROM order_records WHERE id = ? AND seq = ? AND deleted = 0').bind(id, baseSeq).first();
+  const denied = before && refused(user, JSON.parse(before.data), order);
+  if (denied) return denied;
   const row = before && await db.prepare(`UPDATE order_records SET data = ?, updated_at = ?, seq = ${NEXT_SEQ}
     WHERE id = ? AND seq = ? AND deleted = 0 RETURNING *`)
     .bind(storedData(order), new Date().toISOString(), id, baseSeq).first();
