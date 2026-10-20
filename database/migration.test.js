@@ -28,6 +28,12 @@ test('migra pedidos existentes y permite el estado recibido', () => {
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
 });
 
+test('copia los pedidos antiguos a order_records', () => {
+  const row = db.prepare("SELECT * FROM order_records WHERE id = 'old-order'").get();
+  assert.equal(row.order_number, 1);
+  assert.equal(JSON.parse(row.data).status, 'preparando');
+});
+
 test.after(() => {
   db.close();
   rmSync(directory, { recursive: true, force: true });

@@ -3,7 +3,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { handler as stateHandler } from './database/api.js';
+import { handler as apiHandler } from './database/api.js';
 
 const root = resolve(fileURLToPath(new URL('./dist/', import.meta.url)));
 const username = process.env.ANTOJITOS_ACCESS_USER || 'miriam';
@@ -63,7 +63,7 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
-    if (new URL(req.url, 'http://localhost').pathname === '/api/state') await stateHandler(req, res);
+    if (new URL(req.url, 'http://localhost').pathname.startsWith('/api/')) await apiHandler(req, res);
     else await serveFile(req, res);
   } catch (error) {
     console.error(error);

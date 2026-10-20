@@ -31,6 +31,14 @@ const readImage = (file, cb) => {
 
 const BACKUP_PREFIX = 'antojitos_miriam_';
 
+const uploadQr = async (dataUrl) => {
+  const response = await fetch('/api/files/yape-qr', { method: 'PUT', body: dataUrl });
+  if (!response.ok) {
+    const details = await response.json().catch(() => null);
+    throw new Error(details?.error || 'No se pudo subir el QR');
+  }
+};
+
 const PAYMENT_OPTIONS = [
   { key: 'efectivo', label: 'Efectivo', icon: Coins },
   { key: 'yape', label: 'Yape', icon: Smartphone },
@@ -49,6 +57,8 @@ export const SettingsView = () => {
     updateCategory,
     deleteCategory,
     resetCategoriesToDefault,
+    orders,
+    pendingOrders,
   } = useApp();
 
   // Hooks declared unconditionally to keep hook order stable
@@ -56,6 +66,7 @@ export const SettingsView = () => {
   const [newCatName, setNewCatName] = useState('');
   const [editingCat, setEditingCat] = useState(null);
   const [importMsg, setImportMsg] = useState('');
+  const [qrError, setQrError] = useState('');
   const logoInputRef = useRef(null);
   const qrInputRef = useRef(null);
   const importInputRef = useRef(null);
@@ -93,11 +104,31 @@ export const SettingsView = () => {
     e.target.value = '';
   };
 
+  // The QR is stored apart from the rest of the data so it is not sent with every save.
   const handleQrUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    readImage(file, (dataUrl) => updateSettings({ yapeQr: dataUrl }));
+    setQrError('');
+    readImage(file, async (dataUrl) => {
+      try {
+        await uploadQr(dataUrl);
+        updateSettings({ yapeQr: `/api/files/yape-qr?v=${Date.now()}` });
+      } catch (error) {
+        setQrError(error.message);
+      }
+    });
     e.target.value = '';
+  };
+
+  const handleQrRemove = async () => {
+    setQrError('');
+    try {
+      const response = await fetch('/api/files/yape-qr', { method: 'DELETE' });
+      if (!response.ok) throw new Error('No se pudo quitar el QR');
+      updateSettings({ yapeQr: null });
+    } catch (error) {
+      setQrError(error.message);
+    }
   };
 
   const togglePayment = (key) => {
@@ -112,6 +143,10 @@ export const SettingsView = () => {
   };
 
   const handleExport = async () => {
+    if (pendingOrders) {
+      setImportMsg('Hay pedidos pendientes de enviar. Espera a tener conexión y vuelve a intentarlo.');
+      return;
+    }
     let saved;
     try {
       const response = await fetch('/api/state');
@@ -131,7 +166,7 @@ export const SettingsView = () => {
       for (const [suffix, value] of Object.entries({
         users_list: saved.users, customers: saved.customers, menu: saved.menu,
         cremas: saved.cremas, settings: saved.settings, categories: saved.categories,
-        orders: saved.orders, expenses: saved.expenses
+        orders: orders.map(({ _seq, ...order }) => order), expenses: saved.expenses
       })) data[`${BACKUP_PREFIX}${suffix}`] = JSON.stringify(value);
       data[`${BACKUP_PREFIX}greeting`] = saved.greetingTemplate;
     }
@@ -166,6 +201,7 @@ export const SettingsView = () => {
         const read = (suffix, fallback) => {
           try { return JSON.parse(data[`${BACKUP_PREFIX}${suffix}`]) ?? fallback; } catch { return fallback; }
         };
+        const restoredOrders = read('orders', []);
         const restored = {
           _revision: (await (await fetch('/api/state')).json())?._revision ?? 0,
           users: read('users_list', []),
@@ -174,17 +210,29 @@ export const SettingsView = () => {
           cremas: read('cremas', []),
           settings: read('settings', {}),
           categories: read('categories', []),
-          orders: read('orders', []),
           expenses: read('expenses', []),
           greetingTemplate: data[`${BACKUP_PREFIX}greeting`] || ''
         };
+        // Older backups carry the QR image inside the settings.
+        if (String(restored.settings.yapeQr || '').startsWith('data:')) {
+          await uploadQr(restored.settings.yapeQr);
+          restored.settings.yapeQr = `/api/files/yape-qr?v=${Date.now()}`;
+        }
         const response = await fetch('/api/state', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(restored)
         });
         if (!response.ok) throw new Error('No se pudo guardar el respaldo en la base de datos');
+        const ordersResponse = await fetch('/api/orders/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orders: restoredOrders })
+        });
+        if (!ordersResponse.ok) throw new Error('No se pudieron guardar los pedidos del respaldo');
         keys.forEach((k) => localStorage.setItem(k, data[k]));
+        localStorage.setItem(`${BACKUP_PREFIX}settings`, JSON.stringify(restored.settings));
+        localStorage.setItem(`${BACKUP_PREFIX}order_sync`, JSON.stringify({ dirty: [], removed: [] }));
         window.location.reload();
       } catch (error) {
         setImportMsg(error.message || 'No se pudo leer el archivo. Verifica que sea un respaldo válido.');
@@ -371,15 +419,16 @@ export const SettingsView = () => {
                 {settings.yapeQr && (
                   <button
                     type="button"
-                    onClick={() => updateSettings({ yapeQr: null })}
+                    onClick={handleQrRemove}
                     className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-stone-800 text-slate-600 dark:text-stone-300 font-bold text-xs flex items-center gap-1.5 hover:bg-red-50 hover:text-red-600"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Quitar QR
                   </button>
                 )}
                 <p className="text-[11px] text-slate-400 dark:text-stone-500 max-w-[180px]">
-                  Usa una imagen ligera (menos de ~300 KB) para no llenar el almacenamiento.
+                  Usa una imagen ligera (menos de ~1 MB).
                 </p>
+                {qrError && <p role="alert" className="text-[11px] font-bold text-red-600 max-w-[180px]">{qrError}</p>}
               </div>
             </div>
           </Field>

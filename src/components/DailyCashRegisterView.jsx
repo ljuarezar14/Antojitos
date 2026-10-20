@@ -37,7 +37,8 @@ export const DailyCashRegisterView = () => {
     addExpense,
     deleteExpense,
     settings,
-    dbError
+    dbError,
+    pendingOrders
   } = useApp();
 
   const [expenseDesc, setExpenseDesc] = useState('');
@@ -169,13 +170,13 @@ export const DailyCashRegisterView = () => {
       const saved = await response.json();
       if (!saved) throw new Error('Todavía no hay datos guardados.');
       const savedExpenses = saved.expenses.filter(expense => expense.date === filterDate);
-      if (JSON.stringify(saved.orders) !== JSON.stringify(orders) ||
+      if (pendingOrders ||
           JSON.stringify(savedExpenses) !== JSON.stringify(filteredExpenses) ||
           JSON.stringify(saved.settings) !== JSON.stringify(settings)) {
         throw new Error('Hay cambios pendientes de guardar. Espera un momento y vuelve a descargar.');
       }
       const { buildDailyReport } = await import('../reports/dailyReport');
-      const report = buildDailyReport(saved, filterDate);
+      const report = buildDailyReport({ ...saved, orders }, filterDate);
       report.save(`cierre-caja-${filterDate}.pdf`);
     } catch (error) {
       setReportError(error.message || 'No se pudo crear el PDF.');

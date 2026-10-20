@@ -15,9 +15,12 @@ import { OpenAccountsView } from './components/OpenAccountsView';
 import { Sparkles, HelpCircle, X } from 'lucide-react';
 
 const MainContent = () => {
-  const { currentUser, activeTab, theme, dbReady, dbError } = useApp();
+  const { currentUser, activeTab, theme, dbReady, dbError: stateError, orderSyncError, orders } = useApp();
+  const dbError = [stateError, orderSyncError].filter(Boolean).join(' · ');
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [receiptOrder, setReceiptOrder] = useState(null);
+  // Modals follow the live order, so a number confirmed by the server shows up right away.
+  const liveOrder = order => order && (orders.find(item => item.id === order.id) || order);
   const [preselectedCustomer, setPreselectedCustomer] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
 
@@ -73,7 +76,7 @@ const MainContent = () => {
       {/* Payment Modal */}
       {paymentOrder && (
         <PaymentModal 
-          order={paymentOrder} 
+          order={liveOrder(paymentOrder)} 
           onClose={() => setPaymentOrder(null)} 
         />
       )}
@@ -81,7 +84,7 @@ const MainContent = () => {
       {/* Receipt Modal */}
       {receiptOrder && (
         <ReceiptModal 
-          order={receiptOrder} 
+          order={liveOrder(receiptOrder)} 
           onClose={() => setReceiptOrder(null)} 
         />
       )}

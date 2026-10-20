@@ -63,6 +63,7 @@ test('D1 guarda, recupera y rechaza una revisión antigua', async () => {
     method: 'PUT', headers, body: JSON.stringify(state)
   }), env, {});
   assert.deepEqual(await (await save()).json(), { ok: true, revision: 1 });
-  assert.deepEqual(await (await worker.fetch(new Request(url, { headers }), env, {})).json(), { ...state, _revision: 1 });
+  const { orders, ...withoutOrders } = state;
+  assert.deepEqual(await (await worker.fetch(new Request(url, { headers }), env, {})).json(), { ...withoutOrders, _revision: 1 });
   assert.equal((await save()).status, 409);
 });

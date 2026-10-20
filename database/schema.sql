@@ -106,3 +106,22 @@ CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
+
+CREATE TABLE IF NOT EXISTS order_records (
+  id TEXT PRIMARY KEY,
+  date TEXT NOT NULL,
+  order_number INTEGER NOT NULL CHECK (order_number > 0),
+  data TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_order_records_number ON order_records(date, order_number) WHERE deleted = 0;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_order_records_seq ON order_records(seq);
+
+CREATE TABLE IF NOT EXISTS app_files (
+  name TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);

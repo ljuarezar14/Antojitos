@@ -1,4 +1,5 @@
 import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { handleOrders, handleFiles } from './ordersApi.js';
 
 const keySets = new Map();
 function accessKeys(teamDomain) {
@@ -32,9 +33,10 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), {
 
 const validState = data =>
   data && Number.isInteger(data._revision) && data._revision >= 0 &&
-  ['users', 'customers', 'categories', 'cremas', 'menu', 'orders', 'expenses'].every(key => Array.isArray(data[key])) &&
+  ['users', 'customers', 'categories', 'cremas', 'menu', 'expenses'].every(key => Array.isArray(data[key])) &&
   data.users.every(user => user && /^\d{4}$/.test(String(user.pin))) &&
   data.settings && typeof data.settings === 'object' &&
+  !String(data.settings.yapeQr || '').startsWith('data:') &&
   typeof data.greetingTemplate === 'string';
 
 export default {
@@ -48,7 +50,7 @@ export default {
       });
     } else {
       if (!env.TEAM_DOMAIN || !env.POLICY_AUD) return json({ error: 'Configura una contraseña de acceso o Cloudflare Access' }, 503);
-      if (url.pathname === '/api/state') {
+      if (url.pathname.startsWith('/api/')) {
         try {
           const token = request.headers.get('Cf-Access-Jwt-Assertion');
           if (!token) return json({ error: 'Acceso requerido' }, 403);
@@ -58,8 +60,11 @@ export default {
         }
       }
     }
-    if (url.pathname !== '/api/state') return env.ASSETS.fetch(request);
+    if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
     try {
+      if (url.pathname === '/api/orders' || url.pathname.startsWith('/api/orders/')) return await handleOrders(request, env.DB, url);
+      if (url.pathname.startsWith('/api/files/')) return await handleFiles(request, env.DB, url);
+      if (url.pathname !== '/api/state') return json({ error: 'No encontrado' }, 404);
       if (request.method === 'GET') {
         const row = await env.DB.prepare('SELECT data, revision FROM app_state WHERE id = 1').first();
         if (!row || row.data === 'null') return json(null);
@@ -74,6 +79,7 @@ export default {
       if (!validState(data)) return json({ error: 'Datos inválidos' }, 400);
       const revision = data._revision;
       delete data._revision;
+      delete data.orders;
       const result = await env.DB.prepare('UPDATE app_state SET data = ?, revision = revision + 1, updated_at = ? WHERE id = 1 AND revision = ?')
         .bind(JSON.stringify(data), new Date().toISOString(), revision).run();
       if (result.meta.changes !== 1) return json({ error: 'Los datos cambiaron en otro dispositivo. Recarga la página antes de guardar.' }, 409);

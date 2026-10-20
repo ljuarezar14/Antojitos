@@ -88,6 +88,20 @@ const getLocalDateString = (d = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
+const ORDER_SYNC_KEY = 'antojitos_miriam_order_sync';
+
+const sortOrders = list => [...list].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+// Resolves with 409/410 bodies too, since the sync handles those; other failures throw.
+const orderRequest = async (url, options = {}) => {
+  const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json' } });
+  const body = await response.json().catch(() => null);
+  if (!response.ok && response.status !== 409 && response.status !== 410) {
+    throw new Error(body?.error || `Error ${response.status}`);
+  }
+  return { status: response.status, body };
+};
+
 const withOrderStatus = (order, status, at = new Date().toISOString()) => {
   if (order.status === status) return order;
   return {
@@ -243,18 +257,171 @@ export const AppProvider = ({ children }) => {
   const writeQueue = useRef(Promise.resolve());
   const dbRevision = useRef(0);
 
+  // Order sync: each order is saved on its own, so two devices never overwrite each other.
+  // `serverOrders` holds the last version the server confirmed for each id; any local order
+  // object that differs from it is pending. Pending ids survive reloads and lost signal.
+  const [orderSyncError, setOrderSyncError] = useState('');
+  const [pendingOrders, setPendingOrders] = useState(0);
+  const serverOrders = useRef(new Map());
+  const orderSync = useRef(null);
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
+  const flushing = useRef(false);
+  const flushAgain = useRef(false);
+  const retryTimer = useRef(null);
+
+  const saveOrderSync = () => {
+    const sync = orderSync.current;
+    setPendingOrders(sync.dirty.size + sync.removed.size);
+    try {
+      localStorage.setItem(ORDER_SYNC_KEY, JSON.stringify({ dirty: [...sync.dirty], removed: [...sync.removed] }));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Puts server versions into the list, leaving orders with unsent local changes alone.
+  const applyServerOrders = (incoming, deletedIds = []) => {
+    const sync = orderSync.current;
+    const replacements = new Map();
+    const previousVersions = new Map();
+    for (const order of incoming) {
+      if (sync.dirty.has(order.id) || sync.removed.has(order.id)) continue;
+      previousVersions.set(order.id, serverOrders.current.get(order.id));
+      serverOrders.current.set(order.id, order);
+      replacements.set(order.id, order);
+    }
+    const gone = new Set(deletedIds.filter(id => !sync.dirty.has(id)));
+    gone.forEach(id => serverOrders.current.delete(id));
+    if (!replacements.size && !gone.size) return;
+    setOrders(previous => {
+      const added = new Map(replacements);
+      const next = previous.filter(order => !gone.has(order.id)).map(order => {
+        if (!added.has(order.id)) return order;
+        const replacement = added.get(order.id);
+        added.delete(order.id);
+        // An edit made in this instant stays; it is sent and resolved as a conflict.
+        return order === previousVersions.get(order.id) ? replacement : order;
+      });
+      return added.size ? sortOrders([...next, ...added.values()]) : next;
+    });
+  };
+
+  const flushOrders = async () => {
+    if (!orderSync.current) return;
+    if (flushing.current) { flushAgain.current = true; return; }
+    flushing.current = true;
+    clearTimeout(retryTimer.current);
+    const sync = orderSync.current;
+    try {
+      do {
+        flushAgain.current = false;
+        for (const id of [...sync.removed]) {
+          await orderRequest(`/api/orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          sync.removed.delete(id);
+          serverOrders.current.delete(id);
+          saveOrderSync();
+        }
+        for (const id of [...sync.dirty]) {
+          const sent = ordersRef.current.find(order => order.id === id);
+          if (!sent) { sync.dirty.delete(id); saveOrderSync(); continue; }
+          const { status, body } = sent._seq == null
+            ? await orderRequest('/api/orders', { method: 'POST', body: JSON.stringify(sent) })
+            : await orderRequest(`/api/orders/${encodeURIComponent(id)}`, {
+              method: 'PUT', body: JSON.stringify({ order: sent, baseSeq: sent._seq })
+            });
+          if (status === 410) {
+            sync.dirty.delete(id);
+            serverOrders.current.delete(id);
+            setOrders(previous => previous.filter(order => order.id !== id));
+            setOrderSyncError(`El pedido #${sent.orderNumber} fue eliminado en otro dispositivo.`);
+          } else if (status === 409) {
+            sync.dirty.delete(id);
+            serverOrders.current.set(id, body.order);
+            setOrders(previous => previous.map(order => order.id === id ? body.order : order));
+            setOrderSyncError(`El pedido #${body.order.orderNumber} se modificó en otro dispositivo. Se cargó la última versión: revísalo y repite tu cambio.`);
+          } else {
+            const confirmed = body.order;
+            serverOrders.current.set(id, confirmed);
+            const current = ordersRef.current.find(order => order.id === id);
+            if (!current) sync.removed.add(id);
+            if (current === sent) sync.dirty.delete(id);
+            // Keep edits made while the request was in flight; they go out on the next pass.
+            setOrders(previous => previous.map(order => order.id !== id ? order
+              : order === sent ? confirmed
+              : { ...order, orderNumber: confirmed.orderNumber, _seq: confirmed._seq }));
+            if (current !== sent) flushAgain.current = true;
+          }
+          saveOrderSync();
+        }
+      } while (flushAgain.current);
+      setOrderSyncError(previous => previous.startsWith('Sin conexión') ? '' : previous);
+    } catch (error) {
+      setOrderSyncError(`Sin conexión: hay pedidos guardados solo en este dispositivo. Se enviarán automáticamente (${error.message}).`);
+      retryTimer.current = setTimeout(() => flushOrders(), 5000);
+    } finally {
+      flushing.current = false;
+    }
+  };
+
+  const pollOrders = async () => {
+    if (!orderSync.current || document.visibilityState === 'hidden') return;
+    try {
+      const { body } = await orderRequest(`/api/orders?since=${orderSync.current.cursor}`);
+      orderSync.current.cursor = body.cursor;
+      applyServerOrders(body.orders, body.deleted);
+    } catch {
+      // The next poll retries; pending sends report connection problems.
+    }
+  };
+
   useEffect(() => {
     let active = true;
-    fetch('/api/state')
-      .then(async response => {
+    Promise.all([
+      fetch('/api/state').then(async response => {
         if (!response.ok) {
           const details = await response.json().catch(() => null);
           throw new Error(details?.error || 'No se pudo abrir la base de datos');
         }
         return response.json();
-      })
-      .then(saved => {
+      }),
+      orderRequest('/api/orders?since=0').then(({ body }) => body)
+    ])
+      .then(([saved, remote]) => {
         if (!active) return;
+        let stored = null;
+        try { stored = JSON.parse(localStorage.getItem(ORDER_SYNC_KEY)); } catch { stored = null; }
+        const sync = {
+          dirty: new Set(stored?.dirty || []),
+          removed: new Set(stored?.removed || []),
+          cursor: remote.cursor
+        };
+        const remoteById = new Map(remote.orders.map(order => [order.id, order]));
+        let localOrders = ordersRef.current;
+        // First run after the update: changes that never reached the server under the old
+        // whole-state saving are still in this browser, so send them now.
+        if (!stored) {
+          const lastChange = order => String(order.updatedAt || order.createdAt || '');
+          localOrders = localOrders.map(order => {
+            const server = remoteById.get(order.id);
+            if (!server) {
+              sync.dirty.add(order.id);
+              return order;
+            }
+            if (lastChange(order) <= lastChange(server)) return order;
+            sync.dirty.add(order.id);
+            return { ...order, orderNumber: server.orderNumber, _seq: server._seq };
+          });
+        }
+        const localPending = localOrders.filter(order => sync.dirty.has(order.id));
+        const pendingIds = new Set(localPending.map(order => order.id));
+        serverOrders.current = new Map(remote.orders.map(order => [order.id, order]));
+        orderSync.current = sync;
+        setOrders(sortOrders([
+          ...remote.orders.filter(order => !pendingIds.has(order.id) && !sync.removed.has(order.id)),
+          ...localPending
+        ]));
+        saveOrderSync();
         if (saved) {
           dbRevision.current = saved._revision;
           setUsers(saved.users);
@@ -263,7 +430,6 @@ export const AppProvider = ({ children }) => {
           setCremas(saved.cremas);
           setSettings({ ...DEFAULT_SETTINGS, ...saved.settings });
           setCategories(saved.categories);
-          setOrders(saved.orders);
           setExpenses(saved.expenses);
           setGreetingTemplate(saved.greetingTemplate);
           setCurrentUser(previous => saved.users.find(user => user.id === previous?.id) || null);
@@ -283,7 +449,7 @@ export const AppProvider = ({ children }) => {
       writeQueue.current = writeQueue.current.catch(() => {}).then(() => fetch('/api/state', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ _revision: dbRevision.current, users, customers, menu, cremas, settings, categories, orders, expenses, greetingTemplate })
+        body: JSON.stringify({ _revision: dbRevision.current, users, customers, menu, cremas, settings, categories, expenses, greetingTemplate })
       }).then(response => {
         if (!response.ok) return response.json().then(data => { throw new Error(data.error || 'Error al guardar'); });
         return response.json();
@@ -293,7 +459,40 @@ export const AppProvider = ({ children }) => {
       }).catch(error => setDbError(`Los cambios solo están en este navegador: ${error.message}`)));
     }, 300);
     return () => clearTimeout(timer);
-  }, [dbReady, users, customers, menu, cremas, settings, categories, orders, expenses, greetingTemplate]);
+  }, [dbReady, users, customers, menu, cremas, settings, categories, expenses, greetingTemplate]);
+
+  // Every local change to an order marks it pending and sends it.
+  useEffect(() => {
+    const sync = orderSync.current;
+    if (!dbReady || !sync) return;
+    const ids = new Set();
+    for (const order of orders) {
+      ids.add(order.id);
+      if (serverOrders.current.get(order.id) !== order) sync.dirty.add(order.id);
+    }
+    for (const id of serverOrders.current.keys()) {
+      if (!ids.has(id)) sync.removed.add(id);
+    }
+    for (const id of sync.dirty) {
+      if (!ids.has(id)) sync.dirty.delete(id);
+    }
+    saveOrderSync();
+    if (sync.dirty.size || sync.removed.size) flushOrders();
+  }, [dbReady, orders]);
+
+  // Other devices' orders show up within a few seconds.
+  useEffect(() => {
+    if (!dbReady) return;
+    const refresh = () => { flushOrders(); pollOrders(); };
+    const timer = setInterval(pollOrders, 5000);
+    window.addEventListener('online', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('online', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [dbReady]);
 
   // Sync to localStorage
   useEffect(() => {
@@ -813,6 +1012,8 @@ export const AppProvider = ({ children }) => {
         greetingTemplate,
         dbReady,
         dbError,
+        orderSyncError,
+        pendingOrders,
         updateGreetingTemplate,
         resetGreetingTemplate,
         activeOrdersCount,
