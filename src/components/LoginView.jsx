@@ -16,7 +16,9 @@ import {
 } from 'lucide-react';
 
 export const LoginView = () => {
-  const { users, login, createFirstAdmin, theme, toggleTheme, settings } = useApp();
+  // The PIN is checked by the server; this list only has names and roles.
+  const { loginUsers: users, needsSetup, login, createFirstAdmin, theme, toggleTheme, settings } = useApp();
+  const [checking, setChecking] = useState(false);
 
   const [selectedUser, setSelectedUser] = useState(users[0] || null);
   const [pin, setPin] = useState('');
@@ -27,7 +29,7 @@ export const LoginView = () => {
   const activeUser = users.find(u => u.id === selectedUser?.id) || users[0] || null;
 
   const handleNumClick = (num) => {
-    if (!activeUser) return;
+    if (!activeUser || checking) return;
     if (pin.length < 4) {
       const newPin = pin + num;
       setPin(newPin);
@@ -49,8 +51,10 @@ export const LoginView = () => {
     setErrorMsg('');
   };
 
-  const attemptLogin = (userId, pinToTest) => {
-    const result = login(userId, pinToTest);
+  const attemptLogin = async (userId, pinToTest) => {
+    setChecking(true);
+    const result = await login(userId, pinToTest);
+    setChecking(false);
     if (!result.success) {
       setErrorMsg(result.message);
       setPin('');
@@ -119,10 +123,15 @@ export const LoginView = () => {
 
         {/* Content */}
         <div className="p-6 space-y-5">
-          {users.length === 0 && (
-            <form onSubmit={event => {
+          {needsSetup && (
+            <form onSubmit={async event => {
               event.preventDefault();
-              if (!createFirstAdmin(ownerName, pin)) setErrorMsg('Ingresa un nombre y un PIN de 4 números.');
+              if (!ownerName.trim() || !/^\d{4}$/.test(pin)) {
+                setErrorMsg('Ingresa un nombre y un PIN de 4 números.');
+                return;
+              }
+              const result = await createFirstAdmin(ownerName, pin);
+              if (!result.success) setErrorMsg(result.message);
             }} className="space-y-3">
               <h1 className="text-lg font-black">Configurar administradora</h1>
               <p className="text-sm">Crea el primer acceso para esta base de datos.</p>

@@ -20,7 +20,7 @@ const db = d1(sqlite);
 const call = async (handler, method, path, body) => {
   const url = new URL(path, 'https://example.com');
   const payload = typeof body === 'string' ? body : body && JSON.stringify(body);
-  const response = await handler(new Request(url, { method, body: payload }), db, url);
+  const response = await handler(new Request(url, { method, body: payload }), db, url, { role: 'admin' });
   const type = response.headers.get('Content-Type') || '';
   return {
     status: response.status,
@@ -84,4 +84,13 @@ test('rechaza pedidos e imágenes inválidos', async () => {
   assert.equal((await call(handleOrders, 'POST', '/api/orders', { id: 'bad' })).status, 400);
   assert.equal((await call(handleFiles, 'PUT', '/api/files/yape-qr', 'data:text/html;base64,PGI+')).status, 400);
   assert.equal((await call(handleFiles, 'GET', '/api/files/otro')).status, 404);
+});
+
+test('una ayudante no puede cambiar el QR ni restaurar pedidos', async () => {
+  const helper = { role: 'ayudante' };
+  const url = new URL('https://example.com/api/files/yape-qr');
+  assert.equal((await handleFiles(new Request(url, { method: 'PUT', body: 'data:image/png;base64,AA==' }), db, url, helper)).status, 403);
+  assert.equal((await handleFiles(new Request(url), db, url, helper)).status, 200);
+  const importUrl = new URL('https://example.com/api/orders/import');
+  assert.equal((await handleOrders(new Request(importUrl, { method: 'POST', body: '{"orders":[]}' }), db, importUrl, helper)).status, 403);
 });

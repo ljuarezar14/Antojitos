@@ -15,8 +15,9 @@ import { OpenAccountsView } from './components/OpenAccountsView';
 import { Sparkles, HelpCircle, X } from 'lucide-react';
 
 const MainContent = () => {
-  const { currentUser, activeTab, theme, dbReady, dbError: stateError, syncError, orders } = useApp();
-  const dbError = [stateError, syncError].filter(Boolean).join(' · ');
+  const { currentUser, activeTab, theme, dbReady, dataReady, offline, dbError: stateError, syncError, orders } = useApp();
+  const offlineNotice = offline && !syncError ? 'Sin conexión: trabajando con los datos guardados en este celular. Los cambios se enviarán al volver la señal.' : '';
+  const dbError = [stateError, syncError, offlineNotice].filter(Boolean).join(' · ');
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [receiptOrder, setReceiptOrder] = useState(null);
   // Modals follow the live order, so a number confirmed by the server shows up right away.
@@ -31,6 +32,10 @@ const MainContent = () => {
   // If user is not authenticated, show Login Screen
   if (!currentUser) {
     return <><LoginView />{dbError && <div role="alert" className="fixed bottom-4 left-4 right-4 z-50 rounded-xl bg-red-900 p-3 text-white text-sm">{dbError}</div>}</>;
+  }
+
+  if (!dataReady) {
+    return <div role={dbError ? 'alert' : undefined} className="min-h-screen grid place-items-center bg-stone-950 px-6 text-center text-amber-400 font-bold">{dbError || 'Cargando datos...'}</div>;
   }
 
   return (

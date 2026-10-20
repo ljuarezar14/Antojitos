@@ -1,6 +1,5 @@
 import { jwtVerify, createRemoteJWKSet } from 'jose';
-import { handleOrders, handleFiles } from './ordersApi.js';
-import { handleData } from './dataApi.js';
+import { handleApi } from './api.js';
 
 const keySets = new Map();
 function accessKeys(teamDomain) {
@@ -55,12 +54,7 @@ export default {
     }
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
     try {
-      if (url.pathname === '/api/orders' || url.pathname.startsWith('/api/orders/')) return await handleOrders(request, env.DB, url);
-      if (url.pathname.startsWith('/api/files/')) return await handleFiles(request, env.DB, url);
-      if (url.pathname === '/api/data' || url.pathname.startsWith('/api/data/')) return await handleData(request, env.DB, url);
-      // Pages from before the per-record storage still call this; they need a reload.
-      if (url.pathname === '/api/state') return json({ error: 'Hay una versión nueva de la aplicación. Recarga la página.' }, 410);
-      return json({ error: 'No encontrado' }, 404);
+      return await handleApi(request, env.DB, url);
     } catch (error) {
       console.error(error);
       return json({ error: 'No se pudo acceder a la base de datos' }, 500);

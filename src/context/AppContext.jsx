@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { useSyncedCollection, syncRequest } from '../sync/useSyncedCollection';
+import { useSyncedCollection, syncRequest, SESSION_EXPIRED } from '../sync/useSyncedCollection';
 import { DEFAULT_MENU, DEFAULT_CREMAS, DEFAULT_CATEGORIES } from '../data/defaultMenu';
 import { debtBalance, paymentEvents } from '../domain/finance';
 
@@ -89,7 +89,28 @@ const getLocalDateString = (d = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
-const sortOrders = list => [...list].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+const CURSORS_KEY = 'antojitos_miriam_cursors';
+
+const readStoredJson = key => {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+};
+
+// Earlier versions kept every user's PIN in this browser; only the server has them now.
+try {
+  const storedUsers = readStoredJson('antojitos_miriam_users_list');
+  if (storedUsers?.some(user => 'pin' in user)) {
+    localStorage.setItem('antojitos_miriam_users_list', JSON.stringify(storedUsers.map(({ pin, ...user }) => user)));
+  }
+} catch (e) {
+  console.error(e);
+}
+
+const sortOrders =list => [...list].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
 const withOrderStatus = (order, status, at = new Date().toISOString()) => {
   if (order.status === status) return order;
@@ -104,12 +125,10 @@ const withOrderStatus = (order, status, at = new Date().toISOString()) => {
 export const AppProvider = ({ children }) => {
   // Authentication State
   const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('antojitos_miriam_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
+    const saved = readStoredJson('antojitos_miriam_user');
+    if (!saved) return null;
+    const { pin, ...user } = saved;
+    return user;
   });
 
   // Every collection is saved record by record (see useSyncedCollection).
@@ -218,51 +237,106 @@ export const AppProvider = ({ children }) => {
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const [dbReady, setDbReady] = useState(false);
+  const [dataReady, setDataReady] = useState(false);
   const [dbError, setDbError] = useState('');
-  const cursors = useRef({ orders: 0, data: 0 });
+  const [offline, setOffline] = useState(false);
+  const [loginUsers, setLoginUsers] = useState([]);
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const cursors = useRef(readStoredJson(CURSORS_KEY));
   const syncError = [...new Set(allStores.map(store => store.error).filter(Boolean))].join(' · ');
   const pendingChanges = allStores.reduce((sum, store) => sum + store.pending, 0);
 
+  const saveCursors = value => {
+    cursors.current = value;
+    try {
+      localStorage.setItem(CURSORS_KEY, JSON.stringify(value));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const loadData = async () => {
+    const [{ body: remoteOrders }, { body: remoteData }] = await Promise.all([
+      syncRequest('/api/orders?since=0'), syncRequest('/api/data?since=0')
+    ]);
+    saveCursors({ orders: remoteOrders.cursor, data: remoteData.cursor });
+    ordersStore.init(remoteOrders.orders);
+    // A brand-new database (nothing but the admin) starts from this browser's data, or
+    // the default menu. Users are never sent from here: the server holds their PINs.
+    const seed = Object.entries(remoteData.records).every(([name, list]) => name === 'users' || list.length === 0);
+    for (const [name, store] of Object.entries(dataStores)) store.init(remoteData.records[name], { seed: seed && name !== 'users' });
+    setOffline(false);
+    setDataReady(true);
+  };
+
+  // Without signal, whoever was signed in keeps working on this browser's copy.
+  const startOffline = () => {
+    if (!cursors.current || !readStoredJson('antojitos_miriam_user')) return false;
+    const restored = allStores.map(store => store.initOffline());
+    if (!restored.every(Boolean)) return false;
+    setOffline(true);
+    setDataReady(true);
+    return true;
+  };
+
+  const refreshLoginUsers = () => syncRequest('/api/session').then(({ body }) => {
+    setLoginUsers(body.users);
+    setNeedsSetup(body.needsSetup);
+    return body;
+  });
+
   useEffect(() => {
     let active = true;
-    Promise.all([syncRequest('/api/orders?since=0'), syncRequest('/api/data?since=0')])
-      .then(([{ body: remoteOrders }, { body: remoteData }]) => {
+    refreshLoginUsers()
+      .then(async session => {
         if (!active) return;
-        cursors.current = { orders: remoteOrders.cursor, data: remoteData.cursor };
-        ordersStore.init(remoteOrders.orders);
-        // A brand-new database starts from this browser's data, or the default menu.
-        const seed = remoteData.cursor === 0;
-        const merged = Object.fromEntries(Object.entries(dataStores).map(([name, store]) =>
-          [name, store.init(remoteData.records[name], { seed })]));
-        setCurrentUser(previous => merged.users.find(user => user.id === previous?.id) || null);
+        setCurrentUser(session.user);
+        if (session.user) await loadData();
         setDbReady(true);
       })
-      .catch(error => { if (active) setDbError(error.message); });
+      .catch(error => {
+        if (!active) return;
+        if (startOffline()) setDbReady(true);
+        else setDbError(navigator.onLine === false ? 'Sin conexión. Abre la aplicación con señal al menos una vez.' : error.message);
+      });
     return () => { active = false; };
+  }, []);
+
+  // The server ended the session (expired, or the user was removed): ask for the PIN again.
+  // Changes not yet sent stay on this device and go out after signing in.
+  useEffect(() => {
+    const expired = () => {
+      setCurrentUser(null);
+      refreshLoginUsers().catch(() => {});
+    };
+    window.addEventListener(SESSION_EXPIRED, expired);
+    return () => window.removeEventListener(SESSION_EXPIRED, expired);
   }, []);
 
   // Other devices' changes show up within a few seconds.
   const poll = async () => {
-    if (document.visibilityState === 'hidden') return;
+    if (document.visibilityState === 'hidden' || !cursors.current) return;
     try {
       const [{ body: orderChanges }, { body: dataChanges }] = await Promise.all([
         syncRequest(`/api/orders?since=${cursors.current.orders}`),
         syncRequest(`/api/data?since=${cursors.current.data}`)
       ]);
-      cursors.current = { orders: orderChanges.cursor, data: dataChanges.cursor };
       ordersStore.applyServer(orderChanges.orders, orderChanges.deleted);
       for (const [name, store] of Object.entries(dataStores)) store.applyServer(dataChanges.records[name], dataChanges.deleted[name]);
+      saveCursors({ orders: orderChanges.cursor, data: dataChanges.cursor });
+      setOffline(false);
     } catch {
       // The next poll retries; pending sends report connection problems.
     }
   };
 
   useEffect(() => {
-    if (!dbReady) return;
+    if (!dataReady || !currentUser) return;
     const refresh = () => {
       allStores.forEach(store => store.flush());
       poll();
     };
+    refresh();
     const timer = setInterval(poll, 5000);
     window.addEventListener('online', refresh);
     document.addEventListener('visibilitychange', refresh);
@@ -271,7 +345,7 @@ export const AppProvider = ({ children }) => {
       window.removeEventListener('online', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [dbReady]);
+  }, [dataReady, currentUser?.id]);
 
   useEffect(() => {
     try {
@@ -285,27 +359,35 @@ export const AppProvider = ({ children }) => {
     }
   }, [currentUser]);
 
-  // Login & Logout
-  const login = (userId, enteredPin) => {
-    const found = users.find(u => u.id === userId && u.pin === enteredPin);
-    if (found) {
-      setCurrentUser(found);
-      return { success: true };
+  // Login & Logout: the server checks the PIN and keeps the session in a cookie.
+  const startSession = async (path, payload) => {
+    let response;
+    try {
+      response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    } catch {
+      return { success: false, message: 'Sin conexión: para ingresar con tu PIN se necesita señal.' };
     }
-    return { success: false, message: 'PIN incorrecto. Intenta de nuevo.' };
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { success: false, message: body?.error || 'No se pudo ingresar.' };
+    setCurrentUser(body.user);
+    setNeedsSetup(false);
+    try {
+      await loadData();
+    } catch (error) {
+      if (!startOffline()) setDbError(error.message);
+    }
+    return { success: true };
   };
+
+  const login = (userId, enteredPin) => startSession('/api/session', { userId, pin: enteredPin });
 
   const logout = () => {
+    fetch('/api/session', { method: 'DELETE' }).catch(() => {});
     setCurrentUser(null);
+    refreshLoginUsers().catch(() => {});
   };
 
-  const createFirstAdmin = (name, pin) => {
-    if (users.length || !/^\d{4}$/.test(pin) || !name.trim()) return false;
-    const admin = { id: `usr-${crypto.randomUUID()}`, name: name.trim(), role: 'admin', pin, avatar: '👩‍🍳' };
-    setUsers([admin]);
-    setCurrentUser(admin);
-    return true;
-  };
+  const createFirstAdmin = (name, pin) => startSession('/api/setup', { name, pin });
 
   // Editable WhatsApp greeting message actions
   const updateGreetingTemplate = (text) => {
@@ -329,16 +411,22 @@ export const AppProvider = ({ children }) => {
     return newUser;
   };
 
+  // A PIN is only sent when it changes; the server stores it hashed.
   const updateUser = (userId, updatedData) => {
-    setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...updatedData } : u)));
+    const { pin, _seq, ...profile } = updatedData;
+    const change = pin ? { ...profile, pin: String(pin).trim() } : profile;
+    setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...change } : u)));
     if (currentUser && currentUser.id === userId) {
-      setCurrentUser(prev => ({ ...prev, ...updatedData }));
+      setCurrentUser(prev => ({ ...prev, name: profile.name ?? prev.name, avatar: profile.avatar ?? prev.avatar, role: profile.role ?? prev.role }));
     }
   };
 
   const deleteUser = (userId) => {
     if (users.length <= 1) {
       return { success: false, message: 'Debe haber al menos un usuario registrado en el sistema.' };
+    }
+    if (!users.some(u => u.id !== userId && u.role === 'admin')) {
+      return { success: false, message: 'Debe quedar al menos una administradora.' };
     }
     setUsers(prev => prev.filter(u => u.id !== userId));
     if (currentUser && currentUser.id === userId) {
@@ -686,7 +774,11 @@ export const AppProvider = ({ children }) => {
         setSoundEnabled,
         greetingTemplate,
         dbReady,
+        dataReady,
         dbError,
+        offline,
+        loginUsers,
+        needsSetup,
         syncError,
         pendingChanges,
         updateGreetingTemplate,

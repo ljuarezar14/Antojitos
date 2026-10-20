@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 
-// Resolves with 409/410 bodies too, since the sync handles those; other failures throw.
+export const SESSION_EXPIRED = 'antojitos:session-expired';
+
+// Resolves with 403/409/410 bodies too, since the sync handles those; other failures throw.
+// A 401 means the session ended: the app is told so it can ask for the PIN again.
 export const syncRequest = async (url, options = {}) => {
   const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json' } });
   const body = await response.json().catch(() => null);
-  if (!response.ok && response.status !== 409 && response.status !== 410) {
+  if (response.status === 401) window.dispatchEvent(new Event(SESSION_EXPIRED));
+  if (!response.ok && ![403, 409, 410].includes(response.status)) {
     throw new Error(body?.error || `Error ${response.status}`);
   }
   return { status: response.status, body };
@@ -99,6 +103,19 @@ export function useSyncedCollection({
     return merged;
   };
 
+  // Starts from this browser's copy when the server cannot be reached. Returns false if
+  // this browser never synced, since then it cannot tell what the server already has.
+  const initOffline = () => {
+    const stored = readStored(syncKey);
+    if (!stored || !storedList.current) return false;
+    const state = { dirty: new Set(stored.dirty), removed: new Set(stored.removed) };
+    serverItems.current = new Map(listRef.current.filter(item => !state.dirty.has(item.id)).map(item => [item.id, item]));
+    sync.current = state;
+    setReady(true);
+    saveSync();
+    return true;
+  };
+
   // Puts server versions into the list, leaving records with unsent local changes alone.
   const applyServer = (incoming, deletedIds = []) => {
     const state = sync.current;
@@ -137,9 +154,15 @@ export function useSyncedCollection({
       do {
         flushAgain.current = false;
         for (const id of [...state.removed]) {
-          await syncRequest(`${path}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          const { status, body } = await syncRequest(`${path}/${encodeURIComponent(id)}`, { method: 'DELETE' });
           state.removed.delete(id);
-          serverItems.current.delete(id);
+          if (status === 403) {
+            const kept = serverItems.current.get(id);
+            if (kept) setList(previous => sort([...previous, kept]));
+            setError(body.error);
+          } else {
+            serverItems.current.delete(id);
+          }
           saveSync();
         }
         for (const id of [...state.dirty]) {
@@ -151,7 +174,13 @@ export function useSyncedCollection({
               method: 'PUT', body: JSON.stringify({ [bodyKey]: sent, baseSeq: sent._seq })
             });
           const confirmed = body?.[bodyKey];
-          if (status === 410) {
+          if (status === 403) {
+            // Not allowed for this user: go back to what the server has.
+            state.dirty.delete(id);
+            const kept = serverItems.current.get(id);
+            setList(previous => kept ? previous.map(item => item.id === id ? kept : item) : previous.filter(item => item.id !== id));
+            setError(body.error);
+          } else if (status === 410) {
             state.dirty.delete(id);
             serverItems.current.delete(id);
             setList(previous => previous.filter(item => item.id !== id));
@@ -206,5 +235,5 @@ export function useSyncedCollection({
     if (state.dirty.size || state.removed.size) flush();
   }, [ready, list]);
 
-  return { list, setList, init, applyServer, flush, pending, error, clearError: () => setError('') };
+  return { list, setList, init, initOffline, applyServer, flush, pending, error, clearError: () => setError('') };
 }

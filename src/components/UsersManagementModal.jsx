@@ -9,8 +9,6 @@ import {
   X, 
   Check, 
   ShieldCheck, 
-  Eye, 
-  EyeOff, 
   AlertCircle 
 } from 'lucide-react';
 
@@ -19,7 +17,6 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
 
   const [isCreating, setIsCreating] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [showPins, setShowPins] = useState({});
 
   // New user form state
   const [newName, setNewName] = useState('');
@@ -27,10 +24,6 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
   const [newPin, setNewPin] = useState('');
   const [newAvatar, setNewAvatar] = useState('🧑‍🍳');
   const [errorMsg, setErrorMsg] = useState('');
-
-  const toggleShowPin = (userId) => {
-    setShowPins(prev => ({ ...prev, [userId]: !prev[userId] }));
-  };
 
   const handleCreate = (e) => {
     e.preventDefault();
@@ -61,7 +54,8 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
   const handleSaveEdit = (e) => {
     e.preventDefault();
     if (!editingUser) return;
-    if (!editingUser.pin || editingUser.pin.toString().length !== 4) {
+    // Blank keeps the current PIN; PINs are stored hashed and cannot be shown.
+    if (editingUser.pin && !/^[0-9]{4}$/.test(editingUser.pin)) {
       alert('El PIN debe ser de 4 dígitos.');
       return;
     }
@@ -217,8 +211,6 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
             </span>
 
             {users.map(u => {
-              const isRevealed = !!showPins[u.id];
-
               return (
                 <div
                   key={u.id}
@@ -236,20 +228,9 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
                         </span>
                       </div>
 
-                      {/* PIN display with toggle */}
                       <div className="flex items-center gap-1.5 mt-0.5 text-xs text-slate-500 dark:text-stone-400">
                         <KeyRound className="w-3 h-3 text-amber-500" />
-                        <span className="font-mono font-bold">
-                          PIN: {isRevealed ? u.pin : '••••'}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => toggleShowPin(u.id)}
-                          className="text-slate-400 hover:text-slate-600 dark:hover:text-stone-200 p-0.5"
-                          title={isRevealed ? 'Ocultar PIN' : 'Ver PIN'}
-                        >
-                          {isRevealed ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                        </button>
+                        <span className="font-mono font-bold">PIN: ••••</span>
                       </div>
                     </div>
                   </div>
@@ -257,7 +238,7 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={() => setEditingUser(u)}
+                      onClick={() => setEditingUser({ ...u, pin: '' })}
                       className="p-1.5 text-slate-400 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-stone-700 rounded-lg"
                       title="Editar usuario o cambiar PIN"
                     >
@@ -310,14 +291,15 @@ export const UsersManagementModal = ({ onClose, inline = false }) => {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-slate-500 dark:text-stone-400 block">Nuevo PIN (4 dígitos):</label>
+                  <label className="text-[10px] font-bold text-slate-500 dark:text-stone-400 block">Nuevo PIN (vacío = no cambiar):</label>
                   <input
-                    type="text"
+                    type="password"
+                    inputMode="numeric"
                     maxLength={4}
                     value={editingUser.pin}
-                    onChange={(e) => setEditingUser({ ...editingUser, pin: e.target.value })}
+                    onChange={(e) => setEditingUser({ ...editingUser, pin: e.target.value.replace(/[^0-9]/g, '') })}
+                    placeholder="••••"
                     className="w-full px-2 py-1.5 bg-white dark:bg-stone-900 border border-slate-200 dark:border-stone-700 rounded-lg text-xs font-black text-center"
-                    required
                   />
                 </div>
               </div>

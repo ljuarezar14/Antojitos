@@ -5,6 +5,7 @@ const STATUSES = ['recibido', 'preparando', 'listo', 'entregado', 'cancelado'];
 const MAX_ORDER_BYTES = 100_000;
 const MAX_FILE_BYTES = 1_500_000;
 const FILES = new Set(['yape-qr', 'logo']);
+const FORBIDDEN = 'Solo la administradora puede cambiar esto.';
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -79,7 +80,7 @@ async function importOrders(db, orders) {
   return json({ ok: true });
 }
 
-export async function handleOrders(request, db, url) {
+export async function handleOrders(request, db, url, user) {
   const id = decodeURIComponent(url.pathname.slice('/api/orders/'.length));
   if (url.pathname === '/api/orders') {
     if (request.method === 'GET') {
@@ -101,6 +102,7 @@ export async function handleOrders(request, db, url) {
   }
   if (url.pathname === '/api/orders/import') {
     if (request.method !== 'POST') return json({ error: 'Método no permitido' }, 405);
+    if (user.role !== 'admin') return json({ error: FORBIDDEN }, 403);
     const { value, error } = await readBody(request, 1_800_000);
     if (error) return error;
     return importOrders(db, value?.orders);
@@ -120,7 +122,7 @@ export async function handleOrders(request, db, url) {
   return updateOrder(db, id, value.order, value.baseSeq);
 }
 
-export async function handleFiles(request, db, url) {
+export async function handleFiles(request, db, url, user) {
   const name = url.pathname.slice('/api/files/'.length);
   if (!FILES.has(name)) return json({ error: 'Archivo no encontrado' }, 404);
   if (request.method === 'GET') {
@@ -133,6 +135,7 @@ export async function handleFiles(request, db, url) {
       headers: { 'Content-Type': match[1], 'Cache-Control': 'private, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' }
     });
   }
+  if (user.role !== 'admin') return json({ error: FORBIDDEN }, 403);
   if (request.method === 'DELETE') {
     await db.prepare('DELETE FROM app_files WHERE name = ?').bind(name).run();
     return json({ ok: true });

@@ -1,8 +1,14 @@
 // Everything except orders (customers, menu, users, settings...) is stored one record
 // per row, so devices only ever save the record they changed.
 
+import { hashPin, publicUser, validPin } from './auth.js';
+
 export const COLLECTIONS = ['users', 'customers', 'categories', 'cremas', 'menu', 'expenses', 'config'];
 const MAX_RECORD_BYTES = 100_000;
+// Helpers can take orders and keep customers, the menu and expenses up to date;
+// users, settings and categories are for the admin only.
+const ADMIN_ONLY = new Set(['users', 'config', 'categories']);
+const FORBIDDEN = 'Solo la administradora puede cambiar esto.';
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -13,7 +19,7 @@ const validRecord = (collection, item) => {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
   if (typeof item.id !== 'string' || !/^[\w-]{1,80}$/.test(item.id)) return false;
   if (collection === 'users') {
-    return typeof item.name === 'string' && ['admin', 'ayudante'].includes(item.role) && /^\d{4}$/.test(String(item.pin));
+    return typeof item.name === 'string' && ['admin', 'ayudante'].includes(item.role) && (item.pin === undefined || validPin(item.pin));
   }
   if (collection === 'config') {
     if (item.id === 'greeting') return typeof item.value === 'string';
@@ -24,11 +30,28 @@ const validRecord = (collection, item) => {
   return true;
 };
 
-const toRecord = row => ({ ...JSON.parse(row.data), _seq: row.seq });
+const toRecord = row => {
+  const item = { ...JSON.parse(row.data), _seq: row.seq };
+  return row.collection === 'users' ? { ...publicUser(item), _seq: row.seq } : item;
+};
 const storedData = item => {
   const { _seq, ...rest } = item;
   return JSON.stringify(rest);
 };
+// A user's PIN is stored only as a hash. Without a new PIN the current one is kept.
+async function withPinHash(item, current) {
+  const { pin, pinHash, pinSalt, _seq, ...user } = item;
+  if (pin !== undefined) return { ...user, ...(await hashPin(pin)) };
+  if (current?.pinHash) return { ...user, pinHash: current.pinHash, pinSalt: current.pinSalt };
+  if (current?.pin) return { ...user, ...(await hashPin(current.pin)) };
+  return null;
+}
+
+async function adminCount(db, exceptId) {
+  const { results } = await db.prepare("SELECT id, data FROM records WHERE collection = 'users' AND deleted = 0").all();
+  return results.filter(row => row.id !== exceptId && JSON.parse(row.data).role === 'admin').length;
+}
+
 const NEXT_SEQ = '(SELECT COALESCE(MAX(seq), 0) + 1 FROM records)';
 
 async function readBody(request, limit) {
@@ -55,6 +78,17 @@ async function importAll(db, collections) {
       !COLLECTIONS.every(name => Array.isArray(collections[name]) && collections[name].every(item => validRecord(name, item)))) {
     return json({ error: 'Respaldo inválido' }, 400);
   }
+  // Backups made by this version carry no PINs; users that still exist keep theirs.
+  const { results: existing } = await db.prepare("SELECT id, data FROM records WHERE collection = 'users' AND deleted = 0").all();
+  const currentUsers = new Map(existing.map(row => [row.id, JSON.parse(row.data)]));
+  const users = [];
+  for (const user of collections.users) {
+    const hashed = await withPinHash(user, currentUsers.get(user.id));
+    if (!hashed) return json({ error: `Falta el PIN de ${user.name} en el respaldo` }, 400);
+    users.push(hashed);
+  }
+  if (!users.some(user => user.role === 'admin')) return json({ error: 'El respaldo no tiene administradora' }, 400);
+  collections = { ...collections, users };
   const now = new Date().toISOString();
   // Shifting every seq past the current maximum keeps them unique and newer than any cursor.
   const statements = [db.prepare(`UPDATE records SET deleted = 1, data = '{}', updated_at = ?,
@@ -71,7 +105,8 @@ async function importAll(db, collections) {
   return json({ ok: true });
 }
 
-export async function handleData(request, db, url) {
+export async function handleData(request, db, url, user) {
+  const isAdmin = user.role === 'admin';
   const [collection, rawId, ...rest] = url.pathname.slice('/api/data'.length).split('/').filter(Boolean);
   if (!collection) {
     if (request.method !== 'GET') return json({ error: 'Método no permitido' }, 405);
@@ -81,29 +116,38 @@ export async function handleData(request, db, url) {
   }
   if (collection === 'import' && !rawId) {
     if (request.method !== 'POST') return json({ error: 'Método no permitido' }, 405);
+    if (!isAdmin) return json({ error: FORBIDDEN }, 403);
     const { value, error } = await readBody(request, 1_800_000);
     if (error) return error;
     return importAll(db, value?.collections);
   }
   if (!COLLECTIONS.includes(collection) || rest.length) return json({ error: 'No encontrado' }, 404);
+  if (ADMIN_ONLY.has(collection) && !isAdmin) return json({ error: FORBIDDEN }, 403);
 
   if (!rawId) {
     if (request.method !== 'POST') return json({ error: 'Método no permitido' }, 405);
     const { value, error } = await readBody(request, MAX_RECORD_BYTES);
     if (error) return error;
     if (!validRecord(collection, value)) return json({ error: 'Datos inválidos' }, 400);
+    let item = value;
+    if (collection === 'users') {
+      const current = await db.prepare("SELECT data FROM records WHERE collection = 'users' AND id = ? AND deleted = 0").bind(value.id).first();
+      item = await withPinHash(value, current && JSON.parse(current.data));
+      if (!item) return json({ error: 'El PIN debe tener 4 números' }, 400);
+    }
     // A new record (or one added back after being deleted) is written as sent; a retried
     // create just writes the same content again.
     const row = await db.prepare(`INSERT INTO records (collection, id, data, seq, deleted, updated_at)
       VALUES (?, ?, ?, ${NEXT_SEQ}, 0, ?)
       ON CONFLICT(collection, id) DO UPDATE SET data = excluded.data, seq = excluded.seq, deleted = 0, updated_at = excluded.updated_at
-      RETURNING *`).bind(collection, value.id, storedData(value), new Date().toISOString()).first();
+      RETURNING *`).bind(collection, item.id, storedData(item), new Date().toISOString()).first();
     return json({ item: toRecord(row) });
   }
 
   const id = decodeURIComponent(rawId);
   if (!/^[\w-]{1,80}$/.test(id)) return json({ error: 'No encontrado' }, 404);
   if (request.method === 'DELETE') {
+    if (collection === 'users' && !(await adminCount(db, id))) return json({ error: 'Debe quedar al menos una administradora.' }, 400);
     await db.prepare(`UPDATE records SET deleted = 1, data = '{}', updated_at = ?, seq = ${NEXT_SEQ}
       WHERE collection = ? AND id = ? AND deleted = 0`).bind(new Date().toISOString(), collection, id).run();
     return json({ ok: true });
@@ -114,9 +158,16 @@ export async function handleData(request, db, url) {
   if (!validRecord(collection, value?.item) || value.item.id !== id || !Number.isSafeInteger(value.baseSeq)) {
     return json({ error: 'Datos inválidos' }, 400);
   }
+  let item = value.item;
+  if (collection === 'users') {
+    const current = await db.prepare("SELECT data FROM records WHERE collection = 'users' AND id = ? AND deleted = 0").bind(id).first();
+    item = await withPinHash(value.item, current && JSON.parse(current.data));
+    if (!item) return json({ error: 'El PIN debe tener 4 números' }, 400);
+    if (item.role !== 'admin' && !(await adminCount(db, id))) return json({ error: 'Debe quedar al menos una administradora.' }, 400);
+  }
   const row = await db.prepare(`UPDATE records SET data = ?, updated_at = ?, seq = ${NEXT_SEQ}
     WHERE collection = ? AND id = ? AND seq = ? AND deleted = 0 RETURNING *`)
-    .bind(storedData(value.item), new Date().toISOString(), collection, id, value.baseSeq).first();
+    .bind(storedData(item), new Date().toISOString(), collection, id, value.baseSeq).first();
   if (row) return json({ item: toRecord(row) });
   const current = await db.prepare('SELECT * FROM records WHERE collection = ? AND id = ?').bind(collection, id).first();
   if (!current || current.deleted) return json({ error: 'Se eliminó en otro dispositivo', deleted: true }, 410);

@@ -1,0 +1,14 @@
+{
+  "name": "Antojitos con Miriam",
+  "short_name": "Antojitos",
+  "description": "Pedidos, caseros y caja diaria",
+  "lang": "es",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0c0a09",
+  "theme_color": "#f59e0b",
+  "icons": [
+    { "src": "/logo.png", "sizes": "1024x405", "type": "image/png", "purpose": "any" }
+  ]
+}

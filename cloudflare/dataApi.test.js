@@ -24,9 +24,9 @@ sqlite.exec(migration('0002_orders_files.sql'));
 sqlite.exec(migration('0003_records.sql'));
 const db = d1(sqlite);
 
-const call = async (method, path, body) => {
+const call = async (method, path, body, user = { role: 'admin' }) => {
   const url = new URL(path, 'https://example.com');
-  const response = await handleData(new Request(url, { method, body: body && JSON.stringify(body) }), db, url);
+  const response = await handleData(new Request(url, { method, body: body && JSON.stringify(body) }), db, url, user);
   return { status: response.status, body: await response.json() };
 };
 
@@ -53,7 +53,10 @@ test('dos dispositivos editan registros distintos sin pisarse', async () => {
   assert.equal(b.status, 200);
   const stale = await call('PUT', `/api/data/users/${miriam.id}`, { item: { ...miriam, pin: '3333' }, baseSeq: miriam._seq });
   assert.equal(stale.status, 409);
-  assert.equal(stale.body.item.pin, '1111');
+  assert.equal(stale.body.item.pin, undefined);
+  const stored = JSON.parse(sqlite.prepare("SELECT data FROM records WHERE collection = 'users' AND id = ?").get(miriam.id).data);
+  assert.equal(stored.pin, undefined);
+  assert.match(stored.pinHash, /^[0-9a-f]{64}$/);
 });
 
 test('altas, bajas y cambios llegan con el cursor', async () => {
@@ -88,4 +91,30 @@ test('el respaldo reemplaza todos los registros', async () => {
   assert.deepEqual(body.records.users.map(user => user.id), ['u9']);
   assert.equal(body.records.cremas.length, 0);
   assert.equal(body.records.config.find(item => item.id === 'settings').value.businessName, 'Restaurado');
+});
+
+test('los PIN nunca se envían al navegador', async () => {
+  const { body } = await call('GET', '/api/data?since=0');
+  for (const user of body.records.users) {
+    assert.equal(user.pin, undefined);
+    assert.equal(user.pinHash, undefined);
+    assert.equal(user.pinSalt, undefined);
+  }
+});
+
+test('una ayudante toma pedidos y cuida la carta, pero no cambia usuarios ni ajustes', async () => {
+  const helper = { role: 'ayudante' };
+  assert.equal((await call('POST', '/api/data/customers', { id: 'c9', name: 'Nuevo' }, helper)).status, 200);
+  assert.equal((await call('POST', '/api/data/menu', { id: 'p9', name: 'Chicha', price: 1 }, helper)).status, 200);
+  assert.equal((await call('POST', '/api/data/users', { id: 'u7', name: 'X', role: 'admin', pin: '1234' }, helper)).status, 403);
+  assert.equal((await call('POST', '/api/data/config', { id: 'greeting', value: 'x' }, helper)).status, 403);
+  assert.equal((await call('POST', '/api/data/import', { collections: {} }, helper)).status, 403);
+});
+
+test('siempre queda una administradora', async () => {
+  const { body } = await call('GET', '/api/data?since=0');
+  const admin = body.records.users.find(user => user.role === 'admin');
+  assert.equal((await call('DELETE', `/api/data/users/${admin.id}`)).status, 400);
+  const demote = await call('PUT', `/api/data/users/${admin.id}`, { item: { ...admin, role: 'ayudante' }, baseSeq: admin._seq });
+  assert.equal(demote.status, 400);
 });

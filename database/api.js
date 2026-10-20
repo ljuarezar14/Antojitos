@@ -1,7 +1,6 @@
 import { db } from './store.js';
 import { d1 } from './d1.js';
-import { handleOrders, handleFiles } from '../cloudflare/ordersApi.js';
-import { handleData } from '../cloudflare/dataApi.js';
+import { handleApi } from '../cloudflare/api.js';
 
 const database = d1(db);
 
@@ -19,7 +18,7 @@ const json = (res, status, value) => {
   res.end(JSON.stringify(value));
 };
 
-// Runs the same handlers as the Cloudflare Worker on top of local SQLite.
+// Runs the same API as the Cloudflare Worker on top of local SQLite.
 async function sharedHandler(req, res, url, handle) {
   let body;
   if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -39,11 +38,6 @@ async function sharedHandler(req, res, url, handle) {
 }
 
 export async function handler(req, res) {
-  const url = new URL(req.originalUrl || req.url, 'http://localhost');
-  const under = prefix => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`);
-  if (under('/api/orders')) return sharedHandler(req, res, url, handleOrders);
-  if (under('/api/data')) return sharedHandler(req, res, url, handleData);
-  if (url.pathname.startsWith('/api/files/')) return sharedHandler(req, res, url, handleFiles);
-  if (url.pathname === '/api/state') return json(res, 410, { error: 'Hay una versión nueva de la aplicación. Recarga la página.' });
-  return json(res, 404, { error: 'No encontrado' });
+  const url = new URL(req.originalUrl || req.url, `http://${req.headers.host || 'localhost'}`);
+  return sharedHandler(req, res, url, handleApi);
 }
