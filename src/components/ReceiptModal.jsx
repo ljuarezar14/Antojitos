@@ -2,22 +2,15 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { orderNumberText } from '../domain/orders';
 import { debtBalance } from '../domain/finance';
-import { buildReceipt } from '../print/escpos';
-import { bluetoothAvailable, printBytes } from '../print/bluetoothPrinter';
-import { 
-  X, 
-  Share2, 
-  Printer, 
-  CheckCircle, 
-  Copy, 
-  Flame,
-  Bluetooth
+import {
+  X,
+  Share2,
+  CheckCircle,
+  Copy
 } from 'lucide-react';
 
 export const ReceiptModal = ({ order, onClose }) => {
   const [copied, setCopied] = useState(false);
-  const [printing, setPrinting] = useState(false);
-  const [printMessage, setPrintMessage] = useState('');
   const { settings } = useApp();
 
   if (!order) return null;
@@ -89,24 +82,6 @@ export const ReceiptModal = ({ order, onClose }) => {
     const text = getTicketText();
     const encoded = encodeURIComponent(text);
     window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
-  };
-
-  const handlePrint = () => {
-    window.print();
-  };
-
-  // choose: pick another printer instead of the one used last time.
-  const handleBluetoothPrint = async (choose = false) => {
-    setPrinting(true);
-    setPrintMessage('');
-    try {
-      await printBytes(buildReceipt(order, settings, settings?.printerWidth || 32), { choose });
-      setPrintMessage('Ticket enviado a la impresora.');
-    } catch (error) {
-      setPrintMessage(error.message || 'No se pudo imprimir.');
-    } finally {
-      setPrinting(false);
-    }
   };
 
   return (
@@ -195,7 +170,7 @@ export const ReceiptModal = ({ order, onClose }) => {
         </div>
 
         {/* Action Buttons */}
-        <div className={`p-3 bg-white dark:bg-stone-900 grid gap-2 ${bluetoothAvailable() ? 'grid-cols-4' : 'grid-cols-3'}`}>
+        <div className="p-3 bg-white dark:bg-stone-900 grid grid-cols-2 gap-2">
           <button
             onClick={handleCopy}
             className="py-2.5 px-2 rounded-xl bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-700 dark:text-stone-300 font-bold text-xs flex flex-col items-center gap-1 transition-colors"
@@ -211,32 +186,7 @@ export const ReceiptModal = ({ order, onClose }) => {
             <Share2 className="w-4 h-4" />
             <span>WhatsApp</span>
           </button>
-
-          <button
-            onClick={handlePrint}
-            className="py-2.5 px-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-amber-400 font-bold text-xs flex flex-col items-center gap-1 transition-all border border-stone-700"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Imprimir</span>
-          </button>
-
-          {bluetoothAvailable() && (
-            <button
-              onClick={() => handleBluetoothPrint()}
-              disabled={printing}
-              className="py-2.5 px-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold text-xs flex flex-col items-center gap-1 transition-all disabled:opacity-50"
-            >
-              <Bluetooth className="w-4 h-4" />
-              <span>{printing ? 'Enviando…' : 'Térmica'}</span>
-            </button>
-          )}
         </div>
-        {printMessage && (
-          <div role="status" className="px-3 pb-3 text-[11px] font-bold text-slate-600 dark:text-stone-300 flex items-center justify-between gap-2">
-            <span>{printMessage}</span>
-            <button type="button" onClick={() => handleBluetoothPrint(true)} className="underline whitespace-nowrap">Otra impresora</button>
-          </div>
-        )}
 
       </div>
     </div>

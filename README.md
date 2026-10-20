@@ -121,10 +121,6 @@ Una base de datos nueva empieza sin usuarios: la primera persona crea la adminis
 - **Repetir su último pedido**: al elegir un casero aparece su último pedido; un toque lo agrega con las mismas cremas y el precio de hoy. Lo agotado no se agrega y se avisa.
 - **Marcar agotado / Volver a activar**: debajo de cada plato, sin entrar a Carta.
 
-### 10. 🖨️ Ticket en impresora térmica Bluetooth
-- En el ticket, el botón **Térmica** imprime en una impresora Bluetooth de 58 u 80 mm (elige el ancho en Admin → Ticket & Caja). Funciona en **Chrome de Android** (no en iPhone).
-- La primera vez el celular muestra las impresoras cercanas; después recuerda la elegida. **Otra impresora** permite cambiarla.
-- El ticket térmico sale sin tildes ni emojis, porque la mayoría de estas impresoras no los imprime bien. **Imprimir** sigue usando la impresión normal del celular.
 
 ---
 
