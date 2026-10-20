@@ -1,5 +1,6 @@
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { handleApi } from './api.js';
+import { createBackup } from './backup.js';
 
 const keySets = new Map();
 function accessKeys(teamDomain) {
@@ -54,10 +55,15 @@ export default {
     }
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
     try {
-      return await handleApi(request, env.DB, url);
+      return await handleApi(request, env.DB, url, env.BACKUPS);
     } catch (error) {
       console.error(error);
       return json({ error: 'No se pudo acceder a la base de datos' }, 500);
     }
+  },
+
+  // Nightly copy of the database (cron in wrangler.jsonc).
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(createBackup(env.DB, env.BACKUPS).then(backup => console.log('Respaldo creado', backup.key)));
   }
 };

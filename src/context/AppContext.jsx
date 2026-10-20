@@ -90,6 +90,10 @@ const getLocalDateString = (d = new Date()) => {
 };
 
 const CURSORS_KEY = 'antojitos_miriam_cursors';
+const CUSTOMER_STATS_KEY = 'antojitos_miriam_customer_stats';
+// Each device holds this many days of orders (plus debts, open accounts and orders in
+// progress); older days are fetched from the server when someone looks at them.
+const ORDER_WINDOW_DAYS = 60;
 
 const readStoredJson = key => {
   try {
@@ -187,15 +191,22 @@ export const AppProvider = ({ children }) => {
   const setGreetingTemplate = text => setConfigValue('greeting', text);
 
   // Visit counts and spending come from the orders themselves, so two devices charging
-  // at the same time never overwrite each other's totals.
+  // at the same time never overwrite each other's totals. Orders before `archived.before`
+  // are summed by the server; this device adds the ones it holds from that day on.
+  const [archived, setArchived] = useState(() => readStoredJson(CUSTOMER_STATS_KEY) || { before: '0000-00-00', stats: [] });
   const customers = storedCustomers.map(customer => {
-    const theirs = orders.filter(order => order.status !== 'cancelado' && (order.payment || order.debt) &&
-      (order.customerId ? order.customerId === customer.id : order.customerName?.toLowerCase() === customer.name.toLowerCase()));
+    const isTheirs = (customerId, customerName) =>
+      customerId ? customerId === customer.id : customerName?.toLowerCase() === customer.name.toLowerCase();
+    const theirs = orders.filter(order => order.date >= archived.before && order.status !== 'cancelado' &&
+      (order.payment || order.debt) && isTheirs(order.customerId, order.customerName));
+    const past = archived.stats.filter(stat => isTheirs(stat.customerId, stat.customerName));
     return {
       ...customer,
-      totalOrders: theirs.length,
-      totalSpent: Math.round(theirs.reduce((sum, order) => sum + (order.total || 0), 0) * 100) / 100,
-      lastVisit: theirs.reduce((last, order) => (order.date > last ? order.date : last), customer.lastVisit || '')
+      totalOrders: theirs.length + past.reduce((sum, stat) => sum + stat.totalOrders, 0),
+      totalSpent: Math.round((theirs.reduce((sum, order) => sum + (order.total || 0), 0) +
+        past.reduce((sum, stat) => sum + stat.totalSpent, 0)) * 100) / 100,
+      lastVisit: [...theirs.map(order => order.date), ...past.map(stat => stat.lastVisit)]
+        .reduce((last, date) => (date > last ? date : last), customer.lastVisit || '')
     };
   });
 
@@ -256,9 +267,18 @@ export const AppProvider = ({ children }) => {
   };
 
   const loadData = async () => {
-    const [{ body: remoteOrders }, { body: remoteData }] = await Promise.all([
-      syncRequest('/api/orders?since=0'), syncRequest('/api/data?since=0')
+    const from = getLocalDateString(new Date(Date.now() - ORDER_WINDOW_DAYS * 86_400_000));
+    const [{ body: remoteOrders }, { body: remoteData }, { body: pastStats }] = await Promise.all([
+      syncRequest(`/api/orders?since=0&from=${from}`), syncRequest('/api/data?since=0'),
+      syncRequest(`/api/orders/customer-stats?before=${from}`)
     ]);
+    setArchived(pastStats);
+    try {
+      localStorage.setItem(CUSTOMER_STATS_KEY, JSON.stringify(pastStats));
+    } catch (e) {
+      console.error(e);
+    }
+    olderDaysLoaded.current = new Set();
     saveCursors({ orders: remoteOrders.cursor, data: remoteData.cursor });
     ordersStore.init(remoteOrders.orders);
     // A brand-new database (nothing but the admin) starts from this browser's data, or
@@ -312,6 +332,16 @@ export const AppProvider = ({ children }) => {
     window.addEventListener(SESSION_EXPIRED, expired);
     return () => window.removeEventListener(SESSION_EXPIRED, expired);
   }, []);
+
+  // Days before the window are fetched when someone looks at them (cash register, orders).
+  const olderDaysLoaded = useRef(new Set());
+  useEffect(() => {
+    if (!dataReady || !currentUser || filterDate >= archived.before || olderDaysLoaded.current.has(filterDate)) return;
+    olderDaysLoaded.current.add(filterDate);
+    syncRequest(`/api/orders?around=${filterDate}`)
+      .then(({ body }) => ordersStore.applyServer(body.orders))
+      .catch(() => olderDaysLoaded.current.delete(filterDate));
+  }, [dataReady, currentUser?.id, filterDate, archived.before]);
 
   // Other devices' changes show up within a few seconds.
   const poll = async () => {

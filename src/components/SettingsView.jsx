@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { UsersManagementModal } from './UsersManagementModal';
 import {
@@ -47,7 +47,6 @@ const removeImage = async (name) => {
   if (!response.ok) throw new Error('No se pudo quitar la imagen');
 };
 
-const withoutSeq = list => list.map(({ _seq, ...item }) => item);
 
 const PAYMENT_OPTIONS = [
   { key: 'efectivo', label: 'Efectivo', icon: Coins },
@@ -67,13 +66,6 @@ export const SettingsView = () => {
     updateCategory,
     deleteCategory,
     resetCategoriesToDefault,
-    orders,
-    users,
-    customers,
-    menu,
-    cremas,
-    expenses,
-    greetingTemplate,
     pendingChanges,
   } = useApp();
 
@@ -84,6 +76,9 @@ export const SettingsView = () => {
   const [importMsg, setImportMsg] = useState('');
   const [qrError, setQrError] = useState('');
   const [logoError, setLogoError] = useState('');
+  const [backups, setBackups] = useState(null);
+  const [backupsError, setBackupsError] = useState('');
+  const [creatingBackup, setCreatingBackup] = useState(false);
   const logoInputRef = useRef(null);
   const qrInputRef = useRef(null);
   const importInputRef = useRef(null);
@@ -158,27 +153,40 @@ export const SettingsView = () => {
       setImportMsg('Hay cambios pendientes de enviar. Espera a tener conexión y vuelve a intentarlo.');
       return;
     }
-    const data = {};
-    for (const [suffix, value] of Object.entries({
-      users_list: withoutSeq(users),
-      customers: withoutSeq(customers).map(({ totalOrders, totalSpent, ...customer }) => customer),
-      menu: withoutSeq(menu), cremas: withoutSeq(cremas), settings, categories: withoutSeq(categories),
-      orders: withoutSeq(orders), expenses: withoutSeq(expenses)
-    })) data[`${BACKUP_PREFIX}${suffix}`] = JSON.stringify(value);
-    data[`${BACKUP_PREFIX}greeting`] = greetingTemplate;
-    const payload = {
-      app: 'antojitos-miriam',
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      data,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+    // The server builds the full copy: this device only holds the recent orders.
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `respaldo-antojitos-${new Date().toISOString().slice(0, 10)}.json`;
+    a.href = '/api/backups/now';
+    a.download = '';
     a.click();
-    URL.revokeObjectURL(url);
+  };
+
+  const loadBackups = async () => {
+    try {
+      const response = await fetch('/api/backups');
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'No se pudo leer la lista de respaldos');
+      setBackups(body.backups);
+      setBackupsError('');
+    } catch (error) {
+      setBackupsError(error.message);
+    }
+  };
+
+  useEffect(() => {
+    if (segment === 'respaldo') loadBackups();
+  }, [segment]);
+
+  const handleBackupNow = async () => {
+    setCreatingBackup(true);
+    try {
+      const response = await fetch('/api/backups', { method: 'POST' });
+      if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'No se pudo crear el respaldo');
+      await loadBackups();
+    } catch (error) {
+      setBackupsError(error.message);
+    } finally {
+      setCreatingBackup(false);
+    }
   };
 
   const handleImport = (e) => {
@@ -198,10 +206,11 @@ export const SettingsView = () => {
           try { return JSON.parse(data[`${BACKUP_PREFIX}${suffix}`]) ?? fallback; } catch { return fallback; }
         };
         const restoredSettings = read('settings', {});
-        // Older backups carry the images inside the settings.
+        // Server backups carry the images apart; older ones inside the settings.
         for (const [key, name] of [['yapeQr', 'yape-qr'], ['logo', 'logo']]) {
-          if (String(restoredSettings[key] || '').startsWith('data:')) {
-            restoredSettings[key] = await uploadImage(name, restoredSettings[key]);
+          const image = parsed.files?.[name] || restoredSettings[key];
+          if (String(image || '').startsWith('data:')) {
+            restoredSettings[key] = await uploadImage(name, image);
           }
         }
         const collections = {
@@ -642,6 +651,45 @@ export const SettingsView = () => {
           <p className="text-[11px] text-slate-400 dark:text-stone-500">
             Incluye menú, cremas, clientes, pedidos, gastos, usuarios y toda la configuración.
           </p>
+
+          <div className="border-t border-slate-200 dark:border-stone-800 pt-4 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <h4 className="font-black text-sm text-slate-900 dark:text-white">Respaldos automáticos</h4>
+                <p className="text-[11px] text-slate-500 dark:text-stone-400">Se guarda uno cada madrugada (3:00 a. m.) y se conservan 90 días.</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleBackupNow}
+                disabled={creatingBackup}
+                className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-xs disabled:opacity-50"
+              >
+                {creatingBackup ? 'Creando…' : 'Crear respaldo ahora'}
+              </button>
+            </div>
+            {backupsError && <p role="alert" className="text-xs font-bold text-red-600">{backupsError}</p>}
+            {!backupsError && !backups && <p className="text-xs text-slate-500 dark:text-stone-400">Cargando respaldos…</p>}
+            {!backupsError && backups?.length === 0 && (
+              <p className="text-xs text-slate-500 dark:text-stone-400">Todavía no hay respaldos automáticos.</p>
+            )}
+            <ul className="divide-y divide-slate-100 dark:divide-stone-800">
+              {(backups || []).map((backup) => (
+                <li key={backup.key} className="py-2 flex items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-700 dark:text-stone-300">
+                    <span className="font-bold">{new Date(backup.createdAt).toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                    {' · '}{backup.orders} pedidos · {Math.max(1, Math.round((backup.bytes || 0) / 1024))} KB
+                  </span>
+                  <a
+                    href={`/api/backups/${encodeURIComponent(backup.key)}`}
+                    download
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-stone-800 font-bold text-slate-700 dark:text-stone-200 hover:bg-amber-100"
+                  >
+                    Descargar
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       )}
     </div>

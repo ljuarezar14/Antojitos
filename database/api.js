@@ -1,8 +1,11 @@
 import { db } from './store.js';
 import { d1 } from './d1.js';
+import { fileURLToPath } from 'node:url';
+import { folderStore } from './kv.js';
 import { handleApi } from '../cloudflare/api.js';
 
 const database = d1(db);
+const backups = folderStore(process.env.ANTOJITOS_BACKUPS_PATH || fileURLToPath(new URL('./backups/', import.meta.url)));
 
 export function databaseApi() {
   return {
@@ -31,7 +34,7 @@ async function sharedHandler(req, res, url, handle) {
     }
     body = Buffer.concat(chunks);
   }
-  const response = await handle(new Request(url, { method: req.method, headers: req.headers, body }), database, url);
+  const response = await handle(new Request(url, { method: req.method, headers: req.headers, body }), database, url, backups);
   res.statusCode = response.status;
   response.headers.forEach((value, key) => res.setHeader(key, value));
   res.end(Buffer.from(await response.arrayBuffer()));

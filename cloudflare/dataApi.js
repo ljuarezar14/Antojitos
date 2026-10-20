@@ -39,9 +39,11 @@ const storedData = item => {
   return JSON.stringify(rest);
 };
 // A user's PIN is stored only as a hash. Without a new PIN the current one is kept.
-async function withPinHash(item, current) {
+// keepHash: restoring an automatic backup, which carries the hashes themselves.
+async function withPinHash(item, current, keepHash = false) {
   const { pin, pinHash, pinSalt, _seq, ...user } = item;
   if (pin !== undefined) return { ...user, ...(await hashPin(pin)) };
+  if (keepHash && /^[0-9a-f]{64}$/.test(pinHash || '') && /^[0-9a-f]{32}$/.test(pinSalt || '')) return { ...user, pinHash, pinSalt };
   if (current?.pinHash) return { ...user, pinHash: current.pinHash, pinSalt: current.pinSalt };
   if (current?.pin) return { ...user, ...(await hashPin(current.pin)) };
   return null;
@@ -83,7 +85,7 @@ async function importAll(db, collections) {
   const currentUsers = new Map(existing.map(row => [row.id, JSON.parse(row.data)]));
   const users = [];
   for (const user of collections.users) {
-    const hashed = await withPinHash(user, currentUsers.get(user.id));
+    const hashed = await withPinHash(user, currentUsers.get(user.id), true);
     if (!hashed) return json({ error: `Falta el PIN de ${user.name} en el respaldo` }, 400);
     users.push(hashed);
   }

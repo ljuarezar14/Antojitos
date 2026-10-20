@@ -12,6 +12,11 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": true
   },
+  // Nightly backup at 08:00 UTC (03:00 in Peru), stored in the BACKUPS namespace.
+  "triggers": { "crons": ["0 8 * * *"] },
+  "kv_namespaces": [
+    { "binding": "BACKUPS", "id": "cd3ec967f0c54edd8e455f0b0c958bf4" }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

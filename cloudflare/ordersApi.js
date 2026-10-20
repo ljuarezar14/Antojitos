@@ -80,13 +80,72 @@ async function importOrders(db, orders) {
   return json({ ok: true });
 }
 
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const shiftDate = (date, days) => {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+// What a device needs day to day: orders since `from`, plus every debt, open account and
+// order still in progress whatever its date. Older days are fetched with ordersAround.
+async function recentOrders(db, from) {
+  if (!DATE.test(from)) return json({ error: 'Fecha inválida' }, 400);
+  // Read the cursor first: anything written meanwhile is simply sent again on the next poll.
+  const { cursor } = await db.prepare('SELECT COALESCE(MAX(seq), 0) AS cursor FROM order_records').first();
+  const { results } = await db.prepare(`SELECT * FROM order_records WHERE deleted = 0 AND (
+      date >= ?
+      OR json_extract(data, '$.debt') IS NOT NULL
+      OR json_extract(data, '$.openAccount') = 1
+      OR json_extract(data, '$.status') IN ('recibido', 'preparando', 'listo')
+    ) ORDER BY seq`).bind(from).all();
+  return json({ cursor, orders: results.map(toOrder), deleted: [] });
+}
+
+// Orders that matter for one day's screens and report. Payments are stored in UTC, so the
+// day before and after are included and the browser keeps what falls on its local date.
+async function ordersAround(db, date) {
+  if (!DATE.test(date)) return json({ error: 'Fecha inválida' }, 400);
+  const first = shiftDate(date, -1);
+  const last = shiftDate(date, 1);
+  const { results } = await db.prepare(`SELECT * FROM order_records WHERE deleted = 0 AND (
+      date BETWEEN ? AND ?
+      OR substr(json_extract(data, '$.payment.paidAt'), 1, 10) BETWEEN ? AND ?
+      OR EXISTS (SELECT 1 FROM json_each(data, '$.debtPayments') AS p
+                 WHERE substr(json_extract(p.value, '$.paidAt'), 1, 10) BETWEEN ? AND ?)
+    ) ORDER BY seq`).bind(first, last, first, last, first, last).all();
+  return json({ orders: results.map(toOrder) });
+}
+
+// Visits and spending per customer for orders older than `before`; the browser adds the
+// orders it holds itself, so the totals cover the whole history.
+async function customerStats(db, before) {
+  if (!DATE.test(before || '')) return json({ error: 'Fecha inválida' }, 400);
+  const { results } = await db.prepare(`SELECT
+      json_extract(data, '$.customerId') AS customerId,
+      lower(json_extract(data, '$.customerName')) AS customerName,
+      COUNT(*) AS totalOrders,
+      ROUND(SUM(json_extract(data, '$.total')), 2) AS totalSpent,
+      MAX(date) AS lastVisit
+    FROM order_records
+    WHERE deleted = 0 AND date < ?
+      AND json_extract(data, '$.status') <> 'cancelado'
+      AND (json_extract(data, '$.payment') IS NOT NULL OR json_extract(data, '$.debt') IS NOT NULL)
+    GROUP BY 1, 2`).bind(before).all();
+  return json({ before, stats: results });
+}
+
 export async function handleOrders(request, db, url, user) {
   const id = decodeURIComponent(url.pathname.slice('/api/orders/'.length));
   if (url.pathname === '/api/orders') {
     if (request.method === 'GET') {
+      const around = url.searchParams.get('around');
+      if (around) return ordersAround(db, around);
       // `since` lets each device download only what changed after its last poll.
       const since = Number(url.searchParams.get('since') || 0);
       if (!Number.isSafeInteger(since) || since < 0) return json({ error: 'Cursor inválido' }, 400);
+      const from = url.searchParams.get('from');
+      if (!since && from) return recentOrders(db, from);
       const { results } = await db.prepare('SELECT * FROM order_records WHERE seq > ? ORDER BY seq').bind(since).all();
       return json({
         cursor: results.reduce((max, row) => Math.max(max, row.seq), since),
@@ -99,6 +158,10 @@ export async function handleOrders(request, db, url, user) {
     if (error) return error;
     if (!validOrder(value)) return json({ error: 'Pedido inválido' }, 400);
     return createOrder(db, value);
+  }
+  if (url.pathname === '/api/orders/customer-stats') {
+    if (request.method !== 'GET') return json({ error: 'Método no permitido' }, 405);
+    return customerStats(db, url.searchParams.get('before'));
   }
   if (url.pathname === '/api/orders/import') {
     if (request.method !== 'POST') return json({ error: 'Método no permitido' }, 405);
