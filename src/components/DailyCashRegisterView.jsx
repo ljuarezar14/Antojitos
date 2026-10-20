@@ -353,8 +353,8 @@ export const DailyCashRegisterView = () => {
           <span className="text-xs font-black uppercase tracking-wider text-amber-400">
             Resultado del Día (Cobros - Gastos)
           </span>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-3xl sm:text-4xl font-black text-amber-400">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 mt-1">
+            <span className="text-3xl sm:text-4xl font-black text-amber-400 whitespace-nowrap">
               S/ {netProfit.toFixed(2)}
             </span>
             <span className="text-xs text-stone-300 font-bold">

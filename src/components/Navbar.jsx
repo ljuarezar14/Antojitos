@@ -56,48 +56,56 @@ export const Navbar = () => {
     {
       id: 'tomar-pedido',
       label: 'Tomar Pedido',
+      short: 'Pedir',
       icon: ShoppingBag,
       badge: null,
     },
     {
       id: 'pedidos-activos',
       label: 'Pedidos Activos',
+      short: 'Pedidos',
       icon: Clock,
       badge: activeOrdersCount > 0 ? activeOrdersCount : null,
     },
     {
       id: 'cuentas',
       label: 'Cuentas Abiertas',
+      short: 'Cuentas',
       icon: NotebookTabs,
       badge: null,
     },
     {
       id: 'caja',
       label: 'Caja & Ingresos',
+      short: 'Caja',
       icon: DollarSign,
       badge: null,
     },
     {
       id: 'deudas',
       label: 'Deudas',
+      short: 'Deudas',
       icon: Wallet,
       badge: null,
     },
     {
       id: 'clientes',
       label: 'Mis Caseros',
+      short: 'Caseros',
       icon: Users,
       badge: null,
     },
     {
       id: 'menu',
       label: 'Carta & Cremas',
+      short: 'Carta',
       icon: MenuIcon,
       badge: null,
     },
     ...(currentUser?.role === 'admin' ? [{
       id: 'admin',
       label: 'Admin',
+      short: 'Admin',
       icon: Settings,
       badge: null,
     }] : [])
@@ -271,7 +279,7 @@ export const Navbar = () => {
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`relative flex flex-col items-center justify-center flex-none min-w-[60px] grow py-1 px-0.5 rounded-xl transition-all ${
+              className={`relative flex flex-col items-center justify-center flex-1 min-w-[46px] py-1 px-0.5 rounded-xl transition-all ${
                 isActive
                   ? 'text-amber-500 font-black scale-105'
                   : theme === 'dark'
@@ -287,8 +295,8 @@ export const Navbar = () => {
                   </span>
                 )}
               </div>
-              <span className="text-[10px] tracking-tight mt-0.5 leading-tight truncate max-w-[65px] text-center font-bold">
-                {item.label}
+              <span className="text-[10px] tracking-tight mt-0.5 leading-tight truncate max-w-full text-center font-bold">
+                {item.short}
               </span>
             </button>
           );
