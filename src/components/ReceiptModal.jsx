@@ -1,26 +1,42 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { orderNumberText } from '../domain/orders';
 import { debtBalance } from '../domain/finance';
+import { whatsappUrl } from '../domain/debts';
+import { shareTicketImage, ticketImageFile } from '../receipt/ticketImage';
 import {
   X,
   Share2,
   CheckCircle,
-  Copy
+  Copy,
+  Image as ImageIcon
 } from 'lucide-react';
 
 export const ReceiptModal = ({ order, onClose }) => {
   const [copied, setCopied] = useState(false);
+  const [imageFile, setImageFile] = useState(null);
+  const [imageNote, setImageNote] = useState('');
   const { settings } = useApp();
 
-  if (!order) return null;
-
-  const formattedDate = new Date(order.createdAt).toLocaleDateString('es-PE', {
+  const formattedDate = order && new Date(order.createdAt).toLocaleDateString('es-PE', {
     day: 'numeric',
     month: 'short',
     hour: '2-digit',
     minute: '2-digit'
   });
+
+  // Made in advance: phones only open the share menu right after a tap, not after a wait.
+  useEffect(() => {
+    if (!order) return;
+    let current = true;
+    setImageFile(null);
+    ticketImageFile(order, settings, formattedDate)
+      .then(file => { if (current) setImageFile(file); })
+      .catch(error => console.error(error));
+    return () => { current = false; };
+  }, [order, settings]);
+
+  if (!order) return null;
 
   const getTicketText = () => {
     const bizName = settings?.businessName || 'ANTOJITOS CON MIRIAM';
@@ -79,9 +95,13 @@ export const ReceiptModal = ({ order, onClose }) => {
   };
 
   const handleShareWhatsApp = () => {
-    const text = getTicketText();
-    const encoded = encodeURIComponent(text);
-    window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
+    window.open(whatsappUrl(order.customerPhone, getTicketText()), '_blank');
+  };
+
+  const handleShareImage = async () => {
+    if (!imageFile) return;
+    const result = await shareTicketImage(imageFile);
+    setImageNote(result === 'downloaded' ? 'Imagen descargada: adjúntala en WhatsApp.' : '');
   };
 
   return (
@@ -170,7 +190,7 @@ export const ReceiptModal = ({ order, onClose }) => {
         </div>
 
         {/* Action Buttons */}
-        <div className="p-3 bg-white dark:bg-stone-900 grid grid-cols-2 gap-2">
+        <div className="p-3 bg-white dark:bg-stone-900 grid grid-cols-3 gap-2">
           <button
             onClick={handleCopy}
             className="py-2.5 px-2 rounded-xl bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-700 dark:text-stone-300 font-bold text-xs flex flex-col items-center gap-1 transition-colors"
@@ -186,6 +206,16 @@ export const ReceiptModal = ({ order, onClose }) => {
             <Share2 className="w-4 h-4" />
             <span>WhatsApp</span>
           </button>
+
+          <button
+            onClick={handleShareImage}
+            disabled={!imageFile}
+            className="py-2.5 px-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex flex-col items-center gap-1 transition-all shadow-sm disabled:opacity-50"
+          >
+            <ImageIcon className="w-4 h-4" />
+            <span>Imagen</span>
+          </button>
+          {imageNote && <p role="status" className="col-span-3 text-center text-[11px] text-slate-600 dark:text-stone-300">{imageNote}</p>}
         </div>
 
       </div>

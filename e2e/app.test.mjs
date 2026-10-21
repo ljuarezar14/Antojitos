@@ -117,6 +117,32 @@ test('un pedido cobrado en efectivo llega al servidor con número y quién lo to
   assert.equal(order.createdBy, 'Miriam');
 });
 
+test('el ticket se comparte como imagen, o se descarga donde no se puede compartir', async () => {
+  const { page } = admin;
+  await page.evaluate(() => {
+    navigator.canShare = () => true;
+    navigator.share = async ({ files }) => {
+      const bytes = new Uint8Array(await files[0].arrayBuffer());
+      window.shared = { name: files[0].name, type: files[0].type, png: bytes[1] === 0x50 && bytes[2] === 0x4e, size: bytes.length };
+    };
+  });
+  await page.getByRole('button', { name: /Entregados/ }).click();
+  await page.getByRole('button', { name: 'Ver Ticket' }).first().click();
+  const imageButton = page.getByRole('button', { name: 'Imagen' });
+  await imageButton.and(page.locator(':enabled')).waitFor();
+  await imageButton.click();
+  const shared = await page.waitForFunction(() => window.shared).then(handle => handle.jsonValue());
+  assert.equal(shared.type, 'image/png');
+  assert.ok(shared.png && shared.size > 5000, 'es una imagen PNG con contenido');
+  assert.match(shared.name, /^ticket-.*\.png$/);
+
+  await page.evaluate(() => { navigator.canShare = undefined; });
+  const [download] = await Promise.all([page.waitForEvent('download'), imageButton.click()]);
+  assert.match(download.suggestedFilename(), /^ticket-.*\.png$/);  await page.getByText('Imagen descargada: adjúntala en WhatsApp.').waitFor();
+  await page.locator('.fixed.inset-0 button:has(svg.lucide-x)').first().click();
+  await page.getByRole('button', { name: /Activos/ }).click();
+});
+
 test('un pedido fiado aparece en Deudas y se salda con un abono', async () => {
   const { page } = admin;
   await takeOrder(page, dish);
