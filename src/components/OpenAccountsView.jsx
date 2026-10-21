@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { orderNumberText } from '../domain/orders';
 
 export const OpenAccountsView = ({ onOpenPayment }) => {
-  const { orders, setAccountOrderId, setActiveTab, updateOrderStatus } = useApp();
+  const { orders, setAccountOrderId, setActiveTab, updateOrderStatus, markOrderAsDebt, can } = useApp();
   const accounts = orders.filter(order => order.openAccount && !order.payment && !order.debt && order.status !== 'cancelado');
   const total = accounts.reduce((sum, order) => sum + Number(order.total || 0), 0);
 
@@ -27,6 +27,11 @@ export const OpenAccountsView = ({ onOpenPayment }) => {
       <div className="flex flex-wrap gap-2 border-t border-slate-200 dark:border-stone-700 pt-3">
         <button type="button" onClick={() => { setAccountOrderId(order.id); setActiveTab('tomar-pedido'); }} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-black text-stone-950">Agregar consumo</button>
         {onOpenPayment && <button type="button" onClick={() => onOpenPayment(order)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white">Cobrar cuenta completa</button>}
+        {can('fiar') && <button type="button" onClick={() => {
+          if (!confirm(`¿Dejar fiada la cuenta de ${order.customerName}? Quedarán S/ ${Number(order.total).toFixed(2)} por cobrar.`)) return;
+          if (markOrderAsDebt(order.id, order.customerName, order.customerPhone || '')) setActiveTab('deudas');
+          else alert('No se pudo registrar la deuda. Recarga la página e inténtalo otra vez.');
+        }} className="rounded-xl border border-red-300 dark:border-red-800 px-4 py-2 text-sm font-black text-red-700 dark:text-red-400">Dejar fiado</button>}
         {order.status === 'recibido' && <button type="button" onClick={() => updateOrderStatus(order.id, 'preparando')} className="rounded-xl border border-stone-300 dark:border-stone-700 px-4 py-2 text-sm font-bold text-slate-700 dark:text-stone-200">Iniciar preparación</button>}
         {order.status === 'preparando' && <button type="button" onClick={() => updateOrderStatus(order.id, 'listo')} className="rounded-xl border border-stone-300 dark:border-stone-700 px-4 py-2 text-sm font-bold text-slate-700 dark:text-stone-200">Marcar listo</button>}
       </div>

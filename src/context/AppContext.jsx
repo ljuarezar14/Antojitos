@@ -556,7 +556,9 @@ export const AppProvider = ({ children }) => {
   const markOrderAsDebt = (orderId, debtorName, debtorPhone = '') => {
     const order = orders.find(item => item.id === orderId);
     const name = debtorName?.trim();
-    if (!can('fiar') || !order || order.status !== 'listo' || order.payment || order.debt ||
+    // An open account can be left owing at any point; other orders only once they are ready.
+    const canLeave = order?.openAccount ? order.status !== 'cancelado' : order?.status === 'listo';
+    if (!can('fiar') || !order || !canLeave || order.payment || order.debt ||
         !name || name.toLowerCase() === 'cliente al paso') return false;
     const now = new Date().toISOString();
     setOrders(previous => previous.map(item => item.id === orderId ? {

@@ -138,6 +138,21 @@ test('un pedido fiado aparece en Deudas y se salda con un abono', async () => {
   assert.ok(debt.payment, 'la deuda quedó saldada');
 });
 
+test('una cuenta abierta se deja fiada aunque no esté lista', async () => {
+  const { page } = admin;
+  await tab(page, 'Pedir');
+  await page.getByText(dish, { exact: true }).first().click();
+  await page.getByPlaceholder(/Nombre o seña/).fill('Rosa');
+  await page.getByRole('button', { name: 'Abrir cuenta para cobrar al retirarse' }).click();
+  await page.getByRole('button', { name: 'Dejar fiado' }).click();
+  await page.getByRole('heading', { name: 'Rosa' }).waitFor();
+  await waitSynced(page);
+  const account = (await ordersOnServer(page)).find(order => order.customerName === 'Rosa');
+  assert.ok(account.debt, 'la cuenta quedó como deuda');
+  assert.equal(account.openAccount, false);
+  assert.equal(account.status, 'entregado');
+});
+
 test('la caja del día se cierra y el reporte semanal suma los cobros', async () => {
   const { page } = admin;
   await tab(page, 'Caja');
